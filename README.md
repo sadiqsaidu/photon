@@ -69,6 +69,16 @@ npm run submit       # submit real bundles and track them to finalization
 npm run fault        # inject a blockhash expiry; the agent recovers autonomously
 ```
 
+## Dashboard
+
+An operator-console dashboard lives in [`web/`](./web) (Next.js). It connects to
+the `serve`-mode SSE firehose and renders the live transaction journey, the
+bundle-flow animation, the agent's reasoning, and a wallet-connector submit flow.
+
+```bash
+cd web && npm install && npm run dev   # expects the backend on :8080
+```
+
 ## Realtime API (serve mode)
 
 ```bash
