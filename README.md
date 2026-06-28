@@ -1,53 +1,72 @@
 # Photon — Smart Transaction Stack
 
-Photon observes Solana in real time over Yellowstone gRPC, submits transactions
-as Jito bundles inside the correct leader window, tracks each bundle across every
-commitment level, and lets a Gemini-backed agent own the tip decision and the
-reasoning behind every recovery from failure.
+Backend of a smart Solana transaction stack. It streams the network over
+Yellowstone gRPC, tracks transactions across every commitment level, and lets a
+single-model Gemini agent own the tip decision and the reasoning behind every
+failure. Everything is persisted to Postgres.
 
-Architecture document: see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
+Built in two phases:
+
+- **Phase 1 (now):** observation + decision backend. No wallet, no signing, no
+  private key on the server. Streams live data, proves the lifecycle tracker on
+  real on-chain transactions, runs the agent, persists to Postgres + JSONL.
+- **Phase 2:** dashboard with a client-side wallet connector. The backend builds
+  unsigned bundles, the browser wallet signs, the backend submits to Jito and
+  tracks its own bundles. The `build → sign → submit` seams already exist.
+
+Architecture: [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
 ## Layout
 
 ```
 src/
   adapters/   network edge: yellowstone (gRPC), jito, rpc, gemini
-  core/       pure logic: leader, tip-oracle, builder, lifecycle, classifier, orchestrator
+  core/       pure logic: leader, tip-oracle, builder, lifecycle, classifier, worker
   agent/      AI layer behind a single DecisionPort
-  shared/     types, ports, structured + lifecycle logging
+  db/         drizzle schema, client, store (Postgres + JSONL export)
+  shared/     types, ports, logging
+drizzle/      generated migrations
 ```
 
-The agent only ever sees a typed `DecisionPort`. The core never knows it is
-talking to an LLM — that boundary is the only contact point between the AI layer
-and the transaction stack.
+The agent only ever sees a typed `DecisionPort` — the sole contact point between
+the AI layer and the transaction stack.
 
 ## Setup
 
-Requires Node >= 20.
+Requires Node >= 20 and Docker (for local Postgres).
 
 ```bash
 npm install
-cp .env.example .env   # fill in RPC_URL, GRPC_URL/GRPC_TOKEN, GEMINI_API_KEY, WALLET_SECRET
+cp .env.example .env          # fill RPC_URL, GRPC_URL/GRPC_TOKEN, GEMINI_API_KEY
+docker compose up -d db       # local Postgres
+npm run db:migrate            # apply schema
 npm run typecheck
 ```
 
-- **RPC_URL** — any Solana mainnet JSON-RPC (Helius free tier works).
-- **GRPC_URL / GRPC_TOKEN** — a Yellowstone/Geyser gRPC endpoint (Shyft free tier works).
-- **GEMINI_API_KEY** — Google AI Studio key.
-- **WALLET_SECRET** — base58 secret key or a JSON byte array. Fund with a small
-  amount of SOL; tips are bounded by `TIP_CEILING_LAMPORTS` and total spend by
-  `BUDGET_LAMPORTS`.
+- **RPC_URL** — Helius free tier.
+- **GRPC_URL / GRPC_TOKEN** — solinfra.dev Yellowstone gRPC (pay-as-you-go).
+- **GEMINI_API_KEY / GEMINI_MODEL** — Google AI Studio; one model for the agent.
+- **WATCH_ACCOUNT** — the account whose transactions validate the lifecycle
+  tracker. Defaults to a Jito tip account. Higher volume = more GB streamed.
+- **DATABASE_URL** — Postgres connection string.
+- **WALLET_PUBKEY** — public key only, for the build-unsigned demo. No private key.
 
 ## Run
 
 ```bash
-npm start          # submit 10 bundles, track each to finalization
-npm run fault      # inject a blockhash-expiry failure; agent recovers autonomously
+npm start            # observe: stream, track lifecycles, run the tip + failure agent
+npm run construct    # build one unsigned bundle (signing happens client-side later)
 ```
 
-Lifecycle records are appended to `logs/lifecycle/<date>.jsonl`, one sealed entry
-per bundle with slot numbers, commitment stages, timestamps, latency deltas, tip
-amount, failure classification, and the agent's reasoning trace.
+The observer follows live transactions through `processed → confirmed →
+finalized`, records real latency deltas, and runs the agent continuously. Sealed
+lifecycles and every agent decision are written to Postgres (`lifecycles`,
+`decisions` tables) and appended to `logs/lifecycle/<date>.jsonl`.
+
+> Phase 1 does not submit our own bundles, so the bounty's funded-submission
+> lifecycle logs land in phase 2 once the wallet connector exists. Phase 1 proves
+> the streaming, lifecycle, and AI machinery on real mainnet data without holding
+> a key.
 
 ---
 
@@ -58,21 +77,21 @@ network health at the time of submission?**
 
 `processed` means a node has seen and voted on the slot; `confirmed` means a
 supermajority (66%+ of stake) has voted on it. The delta is therefore the time it
-takes votes to propagate and a supermajority to form on top of your transaction's
-slot. A small, stable delta means votes are flowing freely and the cluster is
-healthy. A widening delta signals congestion, fork contention, or degraded vote
-propagation — the network is under stress and landing is less certain. Photon
-records this delta on every bundle so the number reflects the cluster at the
-exact moment of submission, not a general estimate.
+takes votes to propagate and a supermajority to form on top of that slot. A
+small, stable delta means votes are flowing freely and the cluster is healthy. A
+widening delta signals congestion, fork contention, or degraded vote propagation
+— the network is under stress and landing is less certain. Photon records this
+delta on every tracked transaction, so the number reflects the cluster at that
+exact moment, not a general estimate.
 
 **2. Why should you never use `finalized` commitment when fetching a blockhash
 for a time-sensitive transaction?**
 
 A blockhash is only valid for 150 slots (~60–90s). A `finalized` blockhash is
 already ~31+ slots / ~13s old the moment you receive it, so you start with a
-fraction of the validity window already burned — dramatically raising the chance
-of an `expired_blockhash` failure before the bundle can land. `confirmed` is only
-a slot or two behind the tip with negligible rollback risk, giving you almost the
+fraction of the validity window already burned — sharply raising the chance of an
+`expired_blockhash` failure before the bundle can land. `confirmed` is only a
+slot or two behind the tip with negligible rollback risk, giving you almost the
 full window. Photon's builder always fetches at `confirmed`.
 
 **3. What happens to your bundle if the Jito leader skips their slot?**
@@ -80,7 +99,6 @@ full window. Photon's builder always fetches at `confirmed`.
 It does not land and it does not roll over. A bundle is only valid for the leader
 the Block Engine routes it to; if that leader skips their slot, the bundle is
 simply not included, and there is no automatic forwarding to the next leader. You
-will never receive a `processed` event for it. Photon detects this via the
-lifecycle watchdog (nothing lands inside the validity window), classifies it, and
-the agent decides to resubmit targeting the next scheduled Jito leader window
-rather than waiting on a bundle that can never land.
+never receive a `processed` event for it. The right response is to detect the
+non-inclusion and resubmit targeting the next scheduled Jito leader window rather
+than waiting on a bundle that can never land.

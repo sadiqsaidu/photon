@@ -26,8 +26,7 @@ function parse(raw: string): Record<string, unknown> {
 export class Agent implements DecisionPort {
   constructor(
     private readonly llm: LlmClient,
-    private readonly fast: string,
-    private readonly deep: string,
+    private readonly model: string,
     private readonly ceiling: number,
   ) {}
 
@@ -43,7 +42,7 @@ export class Agent implements DecisionPort {
       in_flight: ctx.inFlight,
       slots_to_leader: ctx.slotsToLeader,
     });
-    const p = parse(await this.llm.complete(this.fast, system, user));
+    const p = parse(await this.llm.complete(this.model, system, user));
     const anchor = (ANCHORS as string[]).includes(String(p.anchor))
       ? (p.anchor as keyof TipFloor)
       : "p50";
@@ -67,7 +66,7 @@ export class Agent implements DecisionPort {
       slots_to_leader: ctx.slotsToLeader,
       attempt: ctx.attempt,
     });
-    const d = parse(await this.llm.complete(this.deep, system, user));
+    const d = parse(await this.llm.complete(this.model, system, user));
     const action = ["resubmit", "hold", "abort"].includes(String(d.action))
       ? (d.action as RecoveryDecision["action"])
       : "resubmit";

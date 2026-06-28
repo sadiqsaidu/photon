@@ -1,61 +1,72 @@
 # Photon — Smart Transaction Stack Architecture
 
-Photon observes Solana in real time, submits transactions as Jito bundles at the
-right moment, tracks each bundle across every commitment level, and lets an AI
-agent own one real operational decision: **how much to tip**, plus the reasoning
-behind every recovery from failure.
+Photon is the backend of a smart Solana transaction stack. It observes the
+network in real time over Yellowstone gRPC, tracks transactions across every
+commitment level, and lets an AI agent own one real operational decision — **how
+much to tip** — plus the reasoning behind every failure.
 
-The design goal is a small, correct, infrastructure-grade system — not a demo
-that only works on the happy path.
+It is built in two phases:
+
+- **Phase 1 (this repo today): observation + decision backend.** No wallet, no
+  signing, no private key on the server. It streams live data, proves the
+  lifecycle machinery against real on-chain transactions, runs the tip-policy and
+  failure-reasoning agent, and persists everything to Postgres.
+- **Phase 2: submission + dashboard.** A dashboard with a client-side wallet
+  connector. The backend builds unsigned bundles, the browser wallet signs them,
+  and the backend submits to Jito and tracks its own bundles. The seams for this
+  (`build → sign → submit`) already exist.
+
+The design goal is a small, correct, infrastructure-grade system — never a
+happy-path demo.
 
 ---
 
 ## 1. System architecture
 
-Photon is a single event-driven process built around three boundaries:
+Three boundaries:
 
-- **Adapters** — the only code that touches the network (Geyser gRPC, Jito,
-  Solana RPC, Gemini). Everything network-bound hides behind a port interface.
-- **Core** — pure transaction logic: leader-window detection, tip data, bundle
-  construction, the lifecycle state machine, failure classification, and the
-  orchestrator that drives submissions and retries.
-- **Agent** — the AI layer. The core reaches it through a single typed
-  `DecisionPort`. The core never knows it is talking to an LLM.
+- **Adapters** — the only code that touches the network: solinfra Yellowstone
+  gRPC, Helius RPC, Jito, Gemini. Each hides behind a port interface.
+- **Core** — pure logic: leader-window detection, tip data, the lifecycle state
+  machine, failure classification, bundle construction, and the worker that
+  coordinates the pipeline.
+- **Agent** — the AI layer, reached only through a typed `DecisionPort`. The core
+  never knows it is talking to an LLM.
 
 ```mermaid
 flowchart TB
   subgraph ADAPTERS["Adapters (network edge)"]
-    YS["Yellowstone gRPC\n(slots + our txs)"]
-    JITO["Jito Block Engine\n(Frankfurt)"]
-    RPC["Solana RPC\n(blockhash, schedule)"]
-    GEM["Gemini\n(LLM)"]
+    YS["solinfra Yellowstone gRPC\n(slots + watched txs)"]
+    JITO["Jito Block Engine\n(tip accounts, leader)"]
+    RPC["Helius RPC\n(blockhash)"]
+    GEM["Gemini\n(single model)"]
   end
 
   subgraph CORE["Core (pure logic)"]
     LEADER["Leader Window"]
     TIPS["Tip Oracle"]
-    BUILD["Bundle Builder"]
     LIFE["Lifecycle Tracker\n(state machine)"]
     CLASS["Failure Classifier"]
-    ORCH["Orchestrator\n(policy-free)"]
+    WORK["Worker\n(pipeline)"]
+    BUILD["Bundle Builder\n(build-unsigned · phase 2)"]
   end
 
   subgraph AGENT["Agent (AI layer)"]
     PORT["DecisionPort"]
   end
 
-  YS -->|StreamEvent| LIFE
+  YS -->|StreamEvent| WORK
+  WORK --> LIFE
   YS -->|slots| LEADER
-  RPC --> LEADER
-  RPC --> BUILD
   JITO -->|next Jito leader| LEADER
-  TIPS -->|live tip floor| PORT
-  ORCH -->|DecisionRequest| PORT
-  PORT -->|Decision + reasoning| ORCH
+  TIPS -->|live tip floor| WORK
+  WORK -->|DecisionRequest| PORT
+  PORT -->|Decision + reasoning| WORK
   GEM --- PORT
-  ORCH --> BUILD --> JITO
-  LIFE --> CLASS --> ORCH
-  LIFE --> LOG[("Lifecycle Log\nappend-only JSONL")]
+  LIFE --> CLASS --> WORK
+  WORK --> STORE[("Postgres\nlifecycles · decisions")]
+  WORK --> JSONL[("JSONL export\n(bounty artifact)")]
+  BUILD -. phase 2 .-> JITO
 ```
 
 ---
@@ -64,132 +75,123 @@ flowchart TB
 
 | Component | Responsibility |
 |---|---|
-| **Yellowstone adapter** | Single gRPC subscription to slot commitment updates and to transactions touching our wallet. Owns reconnection, backpressure, and the shed policy. |
-| **Leader Window** | Asks the Jito engine for the next scheduled Jito leader and, using the live slot stream, reports whether the submission window is open or how many slots away it is. |
-| **Tip Oracle** | Pulls the live Jito tip floor (percentiles + EMA) and records what we actually tipped versus whether it landed. Pure data — it never decides the tip. |
-| **Bundle Builder** | Builds a versioned transaction (payload + compute budget + Jito tip), signs it, returns base64 for the bundle. Blockhash is always fetched at `confirmed`. Pluggable `TxPayload`. |
-| **Lifecycle Tracker** | One state machine per signature: `submitted → processed → confirmed → finalized`, stamping slot + wall-clock at each transition and computing the deltas. A watchdog fires `expired_blockhash` if nothing lands inside the validity window. |
-| **Failure Classifier** | Maps raw tx/bundle errors and watchdog timeouts to a typed `FailureClass`. |
-| **Orchestrator** | Drives a submission and, on failure, asks the agent what to change and applies it. Contains **no** retry policy of its own. |
-| **Agent (`DecisionPort`)** | `tipPolicy()` — a continuously refreshed tip policy the hot path reads instantly. `recover()` — on-failure reasoning that returns what to change before resubmitting. |
+| **Yellowstone adapter** | Single gRPC subscription (commitment `processed`) to slot updates and to transactions touching the watched account. Owns reconnection, backpressure, and the shed policy. |
+| **Leader Window** | Asks the Jito engine for the next scheduled Jito leader and reports how many slots away the window is — context for the agent and the seam for phase-2 submission timing. |
+| **Tip Oracle** | Pulls the live Jito tip floor (percentiles + EMA) and tracks observed landing. Pure data; it never decides the tip. |
+| **Lifecycle Tracker** | One state machine per signature: `processed → confirmed → finalized`, stamping slot + wall-clock at each transition. In phase 1 it auto-opens on every observed transaction; in phase 2 it also tracks our own submitted bundles. |
+| **Failure Classifier** | Maps raw transaction errors to a typed `FailureClass`. |
+| **Worker** | Drives the pipeline: stream → tracker, refreshes the tip policy on a timer, and invokes failure reasoning on every observed failure. Contains no decision policy of its own. |
+| **Bundle Builder** | Builds an unsigned bundle (compute budget + payload + Jito tip, `confirmed` blockhash). Signing is external. Exercised today via `npm run construct`. |
+| **Agent (`DecisionPort`)** | `tipPolicy()` — a continuously refreshed, reasoned tip policy. `recover()` — reasons about a failure and what it would change. One Gemini model. |
+| **Store** | Persists sealed lifecycles and every agent decision to Postgres (Drizzle) and appends a JSONL export. |
 
 ---
 
 ## 3. Data flow
 
-**Submission.** Leader Window signals the Jito window is near → Orchestrator reads
-the current `TipPolicy` and computes a tip from live floor data → Builder
-constructs and signs the bundle with a fresh `confirmed` blockhash → Jito adapter
-sends it → Lifecycle Tracker opens a state machine keyed on the signature.
+**Observation (phase 1).** The Yellowstone stream delivers a watched transaction
+at `processed` → the tracker opens a lifecycle and records its slot → slot
+commitment updates for that slot advance it to `confirmed` then `finalized` →
+the worker seals it to Postgres + JSONL with real latency deltas. Failed
+transactions are classified and handed to the agent for reasoning.
 
-**Confirmation.** The Yellowstone stream delivers the transaction (→ `processed`)
-and then slot commitment updates for its slot (→ `confirmed` → `finalized`). The
-tracker advances the state machine, records deltas, and seals the record to the
-log on finalization. RPC polling exists only to reconcile stream gaps — it is
-never the primary signal.
+**Decision (continuous).** Every few seconds the worker refreshes the tip floor,
+asks the agent for a `TipPolicy`, and persists it with its reasoning. The policy
+is what a phase-2 submission path reads to size its tip — so LLM latency never
+sits in a submission hot path.
 
-**Recovery.** The classifier turns a failure into a typed `FailureClass` →
-Orchestrator sends a `DecisionRequest` to the agent → the agent reasons about the
-cause and returns a `RecoveryDecision` (refresh blockhash? bump tip? hold for the
-next leader?) → Orchestrator applies it and opens a new, linked lifecycle.
+**Submission (phase 2).** Worker reads the current policy → Builder constructs an
+unsigned bundle with a `confirmed` blockhash → the client wallet signs → the Jito
+adapter submits → the tracker follows our own bundle to finalization, and the
+agent's `recover()` drives autonomous retries.
 
 ```mermaid
 sequenceDiagram
-  participant O as Orchestrator
-  participant A as Agent (DecisionPort)
-  participant B as Builder
-  participant J as Jito
-  participant L as Lifecycle
   participant S as Yellowstone
+  participant W as Worker
+  participant L as Lifecycle
+  participant A as Agent
+  participant D as Store
 
-  O->>A: tipPolicy(context)
-  A-->>O: TipPolicy + reasoning
-  O->>B: build(payload, tip, confirmed blockhash)
-  B->>J: sendBundle
-  J-->>O: bundleId
-  O->>L: open(signature)
-  S-->>L: tx seen  (processed)
-  S-->>L: slot confirmed
-  S-->>L: slot finalized -> seal
-  Note over L,O: on failure
-  L->>O: FailureClass
-  O->>A: recover(failure, context)
-  A-->>O: RecoveryDecision + reasoning
-  O->>B: rebuild & resubmit
+  S-->>W: tx (processed) on watched account
+  W->>L: observe(signature, slot)
+  S-->>W: slot confirmed
+  W->>L: onSlot -> confirmed
+  S-->>W: slot finalized
+  W->>L: onSlot -> finalized (seal)
+  L-->>W: settled lifecycle
+  W->>D: saveLifecycle (PG + JSONL)
+  Note over W,A: on failure
+  W->>A: recover(failure, context)
+  A-->>W: reasoning + what to change
+  W->>D: saveDecision
+  loop every 5s
+    W->>A: tipPolicy(floor, conditions)
+    A-->>W: policy + reasoning
+    W->>D: saveDecision
+  end
 ```
 
 ---
 
 ## 4. Infrastructure decisions
 
-- **All-TypeScript, single process.** Optimized for shipping speed and one clean
-  codebase. The AI/core split is enforced by the `DecisionPort` interface, not by
-  a process boundary.
-- **Native `fetch` for Jito, RPC, and Gemini.** Jito's Block Engine, the Solana
-  JSON-RPC, and the Gemini API are all plain HTTP/JSON. Only Geyser needs a
-  client library. This keeps the dependency surface to `@solana/web3.js` (tx
-  construction) and the Yellowstone client.
-- **Jito Frankfurt** Block Engine, co-located with the intended deploy region to
-  minimize submission latency.
-- **Mainnet-beta**, so every slot number in the lifecycle log is verifiable on a
-  public explorer. Tips are tiny and bounded by a hard ceiling plus a total
-  spend budget.
+- **All-TypeScript, single headless process.** One clean codebase; the AI/core
+  split is enforced by the `DecisionPort` interface, not a process boundary.
+- **solinfra Yellowstone gRPC, billed per GB.** Billing scales with subscription
+  breadth, so the narrow-filter design (slots + one watched account, never the
+  firehose) is also the cost control. The backpressure queue sheds slot updates
+  under load and never drops transaction updates.
+- **Helius free RPC** for blockhash and reconciliation.
+- **Jito Frankfurt** for tip accounts and leader schedule now; bundle submission
+  in phase 2.
+- **Native `fetch`** for Jito, RPC, and Gemini — only Geyser needs a client lib.
+- **Postgres (Drizzle)** for queryable lifecycle and decision history, plus a
+  JSONL export of every sealed record for the bounty artifact.
+- **Mainnet-beta**, so every slot number is verifiable on a public explorer.
+- **No private key on the server.** Signing is a client-side wallet-connector
+  concern; the backend only ever builds unsigned bundles.
 
 ---
 
 ## 5. Failure handling strategy
 
-Failure handling is a first-class concern, not an afterthought.
-
 - **Reconnection.** The Yellowstone adapter reconnects with exponential backoff
-  and jitter, resubscribes, and surfaces a gap so the tracker can reconcile via
-  RPC instead of silently missing updates.
-- **Backpressure.** A bounded queue sits between the gRPC stream and the
-  consumers. Under overload it sheds *slot* updates (only the latest slot
-  matters) and never drops *transaction* updates (a confirmation cannot be lost).
-  Dropped-event count is logged as a health metric.
-- **Two sources of truth.** The stream is primary; RPC reconciliation is the
-  fallback. Neither is trusted blindly — "RPC polling alone is not sufficient."
+  and jitter and resubscribes; dropped-event counts are logged.
+- **Backpressure.** A bounded queue between the stream and consumers sheds *slot*
+  updates (only the latest matters) but never *transaction* updates.
 - **Typed failures.** `expired_blockhash`, `fee_too_low`, `compute_exceeded`,
-  `bundle_dropped`, `leader_skipped`. Each carries the context the agent needs to
-  reason about it.
-- **Fault injection.** A submission can be forced to use a stale blockhash,
-  guaranteeing an `expired_blockhash` so the autonomous recovery path can be
-  demonstrated on demand.
-- **Cost guardrails.** The agent's tip is clamped to a hard ceiling and retries
-  stop once the spend budget is reached.
+  `bundle_dropped`, `leader_skipped`. Observed on-chain failures are classified
+  and reasoned about by the agent today; in phase 2 the same path drives retries.
+- **Two sources of truth.** The stream is primary; RPC is the reconciliation
+  fallback — never RPC polling alone.
 
 ---
 
 ## 6. AI agent responsibilities
 
-The agent owns **tip intelligence** as its primary, standing decision, and
-**recovery reasoning** as its on-failure decision.
+The agent owns **tip intelligence** as its primary decision and **failure
+reasoning** as its second, both on a single Gemini model behind one `DecisionPort`.
 
-- **Tip policy (primary).** Every few seconds the agent reasons over the live tip
-  floor percentiles, recent landing rate, and current slot conditions, then
-  publishes a `TipPolicy` (which percentile to anchor on, a multiplier, and a
-  ceiling). The hot path reads this instantly, so LLM latency never sits in the
-  submission path — yet the tip is a real, reasoned decision, logged with its
-  rationale on every refresh.
+- **Tip policy (primary, continuous).** It reasons over live tip-floor
+  percentiles, recent landing, and slot conditions, and publishes a `TipPolicy`
+  (anchor percentile, multiplier, ceiling) that a submission path can read
+  instantly. Every refresh is persisted with its reasoning.
+- **Failure reasoning (on failure).** Given a classified failure and current
+  conditions, it explains the cause and what should change before retrying. In
+  phase 2 this becomes the autonomous retry decision; the worker holds no
+  fallback policy, so the decision is genuinely the agent's.
 
-- **Recovery (on failure).** When a bundle fails, the agent receives the failure
-  class and current conditions and decides what to change before retrying —
-  refresh the blockhash, adjust the tip, or hold for a better leader window. The
-  orchestrator has no fallback policy, so the decision genuinely comes from the
-  agent.
-
-Every decision is persisted to the lifecycle log as a reasoning trace, so the
-agent's behavior is auditable rather than a black box.
+Every decision is persisted to Postgres as an auditable reasoning trace.
 
 ```mermaid
 flowchart LR
   subgraph LIVE["Continuous"]
-    F["Tip floor + landing data"] --> TP["tipPolicy()"] --> POL["TipPolicy\n(read by hot path)"]
+    F["Tip floor + landing"] --> TP["tipPolicy()"] --> POL["TipPolicy"]
   end
   subgraph ONFAIL["On failure"]
-    FC["FailureClass + context"] --> RC["recover()"] --> RD["RecoveryDecision\nrefresh / retip / hold"]
+    FC["FailureClass + context"] --> RC["recover()"] --> RD["cause + what to change"]
   end
-  TP -. reasoning .-> LOG[("Lifecycle Log")]
-  RC -. reasoning .-> LOG
+  TP -. reasoning .-> DB[("decisions")]
+  RC -. reasoning .-> DB
 ```

@@ -1,11 +1,9 @@
 import { classify } from "./classifier.js";
-import { record } from "../shared/log.js";
 import type { Commitment, FailureClass, Lifecycle, Slot } from "../shared/types.js";
 
 interface Entry {
   l: Lifecycle;
-  expiresAt: number;
-  slot: Slot | null;
+  slot: Slot;
 }
 
 export class LifecycleTracker {
@@ -13,16 +11,28 @@ export class LifecycleTracker {
 
   constructor(private readonly onSettled: (l: Lifecycle) => void) {}
 
-  track(l: Lifecycle, ttlMs: number): void {
-    l.stages.submitted = { slot: null, at: Date.now() };
-    this.entries.set(l.signature, { l, expiresAt: Date.now() + ttlMs, slot: null });
+  active(): number {
+    return this.entries.size;
   }
 
-  onTx(signature: string, slot: Slot, err: unknown): void {
-    const e = this.entries.get(signature);
-    if (!e) return;
+  observe(signature: string, slot: Slot, err: unknown): void {
+    let e = this.entries.get(signature);
+    if (!e) {
+      const l: Lifecycle = {
+        signature,
+        source: "observed",
+        bundleId: null,
+        tip: 0,
+        payload: "observed",
+        stages: { processed: { slot, at: Date.now() } },
+        failure: null,
+        retryOf: null,
+        trace: null,
+      };
+      e = { l, slot };
+      this.entries.set(signature, e);
+    }
     e.slot = slot;
-    e.l.stages.processed ??= { slot, at: Date.now() };
     if (err) this.settle(e, classify(err, {}));
   }
 
@@ -36,20 +46,11 @@ export class LifecycleTracker {
         this.settle(e, null);
       }
     }
-    this.sweep();
-  }
-
-  private sweep(): void {
-    const now = Date.now();
-    for (const e of this.entries.values()) {
-      if (!e.l.stages.processed && now > e.expiresAt) this.settle(e, "expired_blockhash");
-    }
   }
 
   private settle(e: Entry, failure: FailureClass | null): void {
     if (!this.entries.delete(e.l.signature)) return;
     e.l.failure = failure;
-    record(e.l);
     this.onSettled(e.l);
   }
 }

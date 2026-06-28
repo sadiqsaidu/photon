@@ -46,7 +46,7 @@ class EventQueue {
   }
 }
 
-function request(wallet: string): SubscribeRequest {
+function request(account: string): SubscribeRequest {
   return {
     accounts: {},
     slots: { client: { filterByCommitment: false } },
@@ -54,7 +54,7 @@ function request(wallet: string): SubscribeRequest {
       client: {
         vote: false,
         failed: true,
-        accountInclude: [wallet],
+        accountInclude: [account],
         accountExclude: [],
         accountRequired: [],
       },
@@ -64,7 +64,7 @@ function request(wallet: string): SubscribeRequest {
     blocksMeta: {},
     entry: {},
     accountsDataSlice: [],
-    commitment: CommitmentLevel.CONFIRMED,
+    commitment: CommitmentLevel.PROCESSED,
   };
 }
 
@@ -73,7 +73,7 @@ export class Yellowstone implements StreamSource {
   private readonly queue = new EventQueue();
   private closed = false;
 
-  constructor(url: string, token: string | undefined, private readonly wallet: string) {
+  constructor(url: string, token: string | undefined, private readonly account: string) {
     this.client = new Client(url, token, {
       "grpc.max_receive_message_length": 64 * 1024 * 1024,
     });
@@ -120,7 +120,7 @@ export class Yellowstone implements StreamSource {
           stream.on("data", (u: SubscribeUpdate) => this.map(u));
           stream.on("error", reject);
           stream.on("end", resolve);
-          stream.write(request(this.wallet), (err: unknown) => {
+          stream.write(request(this.account), (err: unknown) => {
             if (err) reject(err);
           });
         });

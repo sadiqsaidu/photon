@@ -28,6 +28,7 @@ export interface DecisionTrace {
 
 export interface Lifecycle {
   signature: string;
+  source: "observed" | "submitted";
   bundleId: string | null;
   tip: Lamports;
   payload: string;

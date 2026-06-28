@@ -6,11 +6,11 @@ export interface Config {
   grpcToken: string | undefined;
   jitoEngine: string;
   geminiKey: string | undefined;
-  geminiModelFast: string;
-  geminiModelDeep: string;
-  walletSecret: string;
+  geminiModel: string;
+  watchAccount: string;
+  walletPubkey: string | undefined;
+  databaseUrl: string;
   tipCeiling: number;
-  budget: number;
 }
 
 function req(name: string): string {
@@ -26,10 +26,10 @@ export function loadConfig(): Config {
     grpcToken: process.env.GRPC_TOKEN,
     jitoEngine: process.env.JITO_ENGINE ?? "https://frankfurt.mainnet.block-engine.jito.wtf",
     geminiKey: process.env.GEMINI_API_KEY,
-    geminiModelFast: process.env.GEMINI_MODEL_FAST ?? "gemini-2.0-flash",
-    geminiModelDeep: process.env.GEMINI_MODEL_DEEP ?? "gemini-2.5-pro",
-    walletSecret: req("WALLET_SECRET"),
+    geminiModel: process.env.GEMINI_MODEL ?? "gemini-2.5-flash",
+    watchAccount: req("WATCH_ACCOUNT"),
+    walletPubkey: process.env.WALLET_PUBKEY,
+    databaseUrl: req("DATABASE_URL"),
     tipCeiling: Number(process.env.TIP_CEILING_LAMPORTS ?? 200_000),
-    budget: Number(process.env.BUDGET_LAMPORTS ?? 50_000_000),
   };
 }

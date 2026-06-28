@@ -37,6 +37,12 @@ export interface LlmClient {
   complete(model: string, system: string, user: string): Promise<string>;
 }
 
+// Wallet-phase seam: signing happens client-side, never on the server.
+export interface Signer {
+  readonly publicKey: string;
+  sign(message: Uint8Array): Promise<Uint8Array>;
+}
+
 export interface TipContext {
   floor: TipFloor;
   landRate: number;
