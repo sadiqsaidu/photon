@@ -1,111 +1,127 @@
 # Photon — Smart Transaction Stack
 
-Backend of a smart Solana transaction stack. It streams the network over
-Yellowstone gRPC, tracks transactions across every commitment level, and lets a
-single-model Gemini agent own the tip decision and the reasoning behind every
-failure. Everything is persisted to Postgres.
+A smart Solana transaction stack. Photon streams the network over Yellowstone
+gRPC, submits transactions as Jito bundles, tracks every bundle across all
+commitment levels, and lets a single-model Gemini agent own the tip decision and
+the reasoning behind every failure. Everything is persisted to Postgres and
+streamed live to an operator dashboard.
 
-Built in two phases:
+Architecture and design: [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
-- **Phase 1 (now):** observation + decision backend. No wallet, no signing, no
-  private key on the server. Streams live data, proves the lifecycle tracker on
-  real on-chain transactions, runs the agent, persists to Postgres + JSONL.
-- **Phase 2:** dashboard with a client-side wallet connector. The backend builds
-  unsigned bundles, the browser wallet signs, the backend submits to Jito and
-  tracks its own bundles. The `build → sign → submit` seams already exist.
+## What it does
 
-Architecture: [`ARCHITECTURE.md`](./ARCHITECTURE.md).
+- **Live streaming** over Yellowstone gRPC with reconnection and backpressure handling.
+- **Lifecycle tracking** of every transaction through `submitted → processed → confirmed → finalized`, with real latency deltas at each stage.
+- **Jito bundles** with **dynamic tips** derived from the live Jito tip floor by an AI agent — no hardcoded values.
+- **Typed failure classification** and an **autonomous recovery** path: on failure the agent reasons about the cause and decides what to change before retrying.
+- **Blockhash-expiry fault injection** to demonstrate the recovery loop on demand.
+- **Postgres** persistence (`lifecycles`, `decisions`) plus a JSONL export, and a **realtime SSE API** the dashboard renders.
+- **No private key on the server** — the backend builds unsigned bundles; the dashboard wallet signs them.
 
-## Layout
+## Repository layout
 
 ```
 src/
-  adapters/   network edge: yellowstone (gRPC), jito, rpc, gemini
-  core/       pure logic: leader, tip-oracle, builder, lifecycle, classifier, worker
+  adapters/   network edge: yellowstone (gRPC), jito, rpc, gemini, signer
+  core/       pure logic: leader, tip-oracle, builder, lifecycle, classifier, worker, submission
   agent/      AI layer behind a single DecisionPort
+  api/        node:http SSE firehose + REST surface
   db/         drizzle schema, client, store (Postgres + JSONL export)
-  shared/     types, ports, logging
+  shared/     types, ports, event bus, logging
 drizzle/      generated migrations
+test/         unit + API integration tests
+web/          Next.js operator dashboard
 ```
 
-The agent only ever sees a typed `DecisionPort` — the sole contact point between
-the AI layer and the transaction stack.
+---
 
-## Setup
+## Prerequisites
 
-Requires Node >= 20 and Docker (for local Postgres).
+- **Node.js >= 20**
+- **Docker** (for local Postgres; or point `DATABASE_URL` at any Postgres)
+- Provider accounts (free tiers are sufficient):
+  - **Helius** — Solana JSON-RPC (free tier). https://helius.dev
+  - **solinfra.dev** — Yellowstone/Geyser gRPC, pay-as-you-go ($0.08/GB). https://solinfra.dev
+  - **Google AI Studio** — a Gemini API key. https://aistudio.google.com
+
+## Install — backend
 
 ```bash
+# 1. install dependencies
 npm install
-cp .env.example .env          # fill RPC_URL, GRPC_URL/GRPC_TOKEN, GEMINI_API_KEY
-docker compose up -d db       # local Postgres
-npm run db:migrate            # apply schema
+
+# 2. configure environment
+cp .env.example .env        # then fill in the values (see table below)
+
+# 3. start Postgres and apply the schema
+docker compose up -d db
+npm run db:migrate
+
+# 4. verify
 npm run typecheck
+npm test
 ```
 
-- **RPC_URL** — Helius free tier.
-- **GRPC_URL / GRPC_TOKEN** — solinfra.dev Yellowstone gRPC (pay-as-you-go).
-- **GEMINI_API_KEY / GEMINI_MODEL** — Google AI Studio; one model for the agent.
-- **WATCH_ACCOUNT** — the account whose transactions validate the lifecycle
-  tracker. Defaults to a Jito tip account. Higher volume = more GB streamed.
-- **DATABASE_URL** — Postgres connection string.
-- **WALLET_PUBKEY** — public key only, for the build-unsigned demo. No private key.
+### Configuration (`.env`)
 
-## Run
+| Variable | Required | Description |
+|---|---|---|
+| `RPC_URL` | yes | Solana mainnet JSON-RPC (Helius free tier). |
+| `GRPC_URL` | yes | Yellowstone gRPC endpoint (solinfra.dev). |
+| `GRPC_TOKEN` | — | Auth token for the gRPC endpoint. |
+| `GEMINI_API_KEY` | yes* | Gemini key. Required for `serve`/`start`; not needed for `construct`. |
+| `GEMINI_MODEL` | — | Model id (default `gemini-2.5-flash`). |
+| `WATCH_ACCOUNT` | yes | Account whose transactions validate the lifecycle tracker. Defaults to a Jito tip account. Higher volume = more GB streamed. |
+| `DATABASE_URL` | yes | Postgres connection string. |
+| `JITO_ENGINE` | — | Jito Block Engine base URL (default Frankfurt). |
+| `TIP_CEILING_LAMPORTS` | — | Hard cap on the agent's tip (default 200000). |
+| `PORT` | — | API server port for `serve` mode (default 8080). |
+| `WALLET_PUBKEY` | — | Public key only, for `npm run construct`. No private key. |
+| `WALLET_SECRET` | — | Optional **throwaway** key for local `submit`/`fault` testing only. Never your real wallet. |
+
+### Run modes
 
 ```bash
-npm start            # observe: stream, track lifecycles, run the tip + failure agent
-npm run construct    # build one unsigned bundle (signing happens client-side later)
-npm test             # unit tests: classifier, lifecycle, agent, submission
+npm run serve      # worker + realtime API (what the dashboard connects to)
+npm start          # headless observe: stream, track lifecycles, run the agent
+npm run construct  # build one unsigned bundle (needs WALLET_PUBKEY only)
+npm test           # unit + API integration tests
 ```
 
-The submission core (`build → sign → submit → track → autonomous retry → fault
-injection`) is implemented behind the `Signer` port. Production signing happens
-client-side via the dashboard wallet; for local end-to-end testing only you may
-set a **throwaway** `WALLET_SECRET` and run:
+Production signing happens client-side via the dashboard wallet. For local
+end-to-end testing only, set a **throwaway** `WALLET_SECRET` and run:
 
 ```bash
-npm run submit       # submit real bundles and track them to finalization
-npm run fault        # inject a blockhash expiry; the agent recovers autonomously
+npm run submit     # submit real bundles and track them to finalization
+npm run fault      # inject a blockhash expiry; the agent recovers autonomously
 ```
 
-## Dashboard
+Sealed lifecycles and every agent decision are written to Postgres
+(`lifecycles`, `decisions`) and appended to `logs/lifecycle/<date>.jsonl`.
 
-An operator-console dashboard lives in [`web/`](./web) (Next.js). It connects to
-the `serve`-mode SSE firehose and renders the live transaction journey, the
-bundle-flow animation, the agent's reasoning, and a wallet-connector submit flow.
+## Install — dashboard
 
 ```bash
-cd web && npm install && npm run dev   # expects the backend on :8080
+cd web
+npm install
+cp .env.example .env.local   # NEXT_PUBLIC_API_BASE (default http://localhost:8080)
+npm run dev                  # http://localhost:3000  (expects the backend in serve mode)
 ```
 
-## Realtime API (serve mode)
-
-```bash
-npm run serve        # run the worker + HTTP API (default port 8080)
-```
-
-The dashboard consumes this. Signing stays client-side: the frontend calls
-`/bundle/prepare` to get an unsigned bundle, the wallet signs it, and the
+The dashboard renders the live transaction journey, the bundle-flow animation,
+the agent's reasoning feed, and a wallet-connector submit flow. Connect a wallet
+to submit: the frontend calls `/bundle/prepare`, the wallet signs, and the
 frontend posts the signed transaction to `/bundle/submit`.
+
+### API reference (serve mode)
 
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/health` | Liveness + whether a server signer is present |
-| GET | `/events` | SSE firehose: `slot`, `lifecycle`, `tip_policy`, `agent`, `stream` events |
+| GET | `/events` | SSE firehose: `slot`, `lifecycle`, `tip_policy`, `agent`, `stream` |
 | POST | `/bundle/prepare` | `{ payer, tip? }` → unsigned bundle for the wallet to sign |
 | POST | `/bundle/submit` | `{ signedTx, signature, tip }` → submits to Jito and tracks it |
 | POST | `/fault` | Inject a blockhash-expiry failure (local-signer demo only) |
-
-The observer follows live transactions through `processed → confirmed →
-finalized`, records real latency deltas, and runs the agent continuously. Sealed
-lifecycles and every agent decision are written to Postgres (`lifecycles`,
-`decisions` tables) and appended to `logs/lifecycle/<date>.jsonl`.
-
-> Phase 1 does not submit our own bundles, so the bounty's funded-submission
-> lifecycle logs land in phase 2 once the wallet connector exists. Phase 1 proves
-> the streaming, lifecycle, and AI machinery on real mainnet data without holding
-> a key.
 
 ---
 
@@ -120,8 +136,8 @@ takes votes to propagate and a supermajority to form on top of that slot. A
 small, stable delta means votes are flowing freely and the cluster is healthy. A
 widening delta signals congestion, fork contention, or degraded vote propagation
 — the network is under stress and landing is less certain. Photon records this
-delta on every tracked transaction, so the number reflects the cluster at that
-exact moment, not a general estimate.
+delta on every tracked transaction (and surfaces it live as "network health"), so
+the number reflects the cluster at that exact moment, not a general estimate.
 
 **2. Why should you never use `finalized` commitment when fetching a blockhash
 for a time-sensitive transaction?**
@@ -141,3 +157,13 @@ simply not included, and there is no automatic forwarding to the next leader. Yo
 never receive a `processed` event for it. The right response is to detect the
 non-inclusion and resubmit targeting the next scheduled Jito leader window rather
 than waiting on a bundle that can never land.
+
+---
+
+## Project status
+
+Built: streaming, lifecycle tracking, the tip/recovery agent, Postgres
+persistence, the submission core (build/sign/submit/track/retry/fault) behind the
+`Signer` port, the realtime API, and the operator dashboard. Pending: a funded
+mainnet run via the wallet connector, which produces the explorer-verifiable
+lifecycle logs.
