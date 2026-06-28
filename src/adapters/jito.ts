@@ -13,9 +13,11 @@ async function call<T>(url: string, method: string, params: unknown[]): Promise<
 }
 
 export class JitoEngine implements BundleGateway {
+  private readonly engine: string;
   private readonly bundles: string;
 
   constructor(engine: string) {
+    this.engine = engine;
     this.bundles = `${engine}/api/v1/bundles`;
   }
 
@@ -24,8 +26,9 @@ export class JitoEngine implements BundleGateway {
   }
 
   async nextLeader(): Promise<{ currentSlot: Slot; nextLeaderSlot: Slot }> {
+    // getNextScheduledLeader lives on its own path, not /api/v1/bundles.
     const r = await call<{ current_slot: number; next_leader_slot: number }>(
-      this.bundles,
+      `${this.engine}/api/v1/getNextScheduledLeader`,
       "getNextScheduledLeader",
       [],
     );
