@@ -9,6 +9,7 @@ export interface Config {
   geminiModel: string;
   watchAccount: string;
   walletPubkey: string | undefined;
+  walletSecret: string | undefined;
   databaseUrl: string;
   tipCeiling: number;
 }
@@ -29,6 +30,7 @@ export function loadConfig(): Config {
     geminiModel: process.env.GEMINI_MODEL ?? "gemini-2.5-flash",
     watchAccount: req("WATCH_ACCOUNT"),
     walletPubkey: process.env.WALLET_PUBKEY,
+    walletSecret: process.env.WALLET_SECRET,
     databaseUrl: req("DATABASE_URL"),
     tipCeiling: Number(process.env.TIP_CEILING_LAMPORTS ?? 200_000),
   };

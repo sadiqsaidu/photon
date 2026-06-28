@@ -56,6 +56,17 @@ npm run typecheck
 ```bash
 npm start            # observe: stream, track lifecycles, run the tip + failure agent
 npm run construct    # build one unsigned bundle (signing happens client-side later)
+npm test             # unit tests: classifier, lifecycle, agent, submission
+```
+
+The submission core (`build → sign → submit → track → autonomous retry → fault
+injection`) is implemented behind the `Signer` port. Production signing happens
+client-side via the dashboard wallet; for local end-to-end testing only you may
+set a **throwaway** `WALLET_SECRET` and run:
+
+```bash
+npm run submit       # submit real bundles and track them to finalization
+npm run fault        # inject a blockhash expiry; the agent recovers autonomously
 ```
 
 The observer follows live transactions through `processed → confirmed →

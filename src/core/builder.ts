@@ -1,11 +1,14 @@
 import {
   ComputeBudgetProgram,
+  type MessageV0,
   PublicKey,
   SystemProgram,
   TransactionInstruction,
   TransactionMessage,
+  VersionedTransaction,
 } from "@solana/web3.js";
-import type { RpcGateway } from "../shared/ports.js";
+import bs58 from "bs58";
+import type { RpcGateway, Signer } from "../shared/ports.js";
 import type { Lamports } from "../shared/types.js";
 
 const MEMO = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
@@ -46,8 +49,13 @@ export class BundleBuilder {
     return new PublicKey(pick as string);
   }
 
-  async buildUnsigned(payload: TxPayload, payer: PublicKey, tip: Lamports): Promise<UnsignedBundle> {
-    const { blockhash } = await this.rpc.latestBlockhash("confirmed");
+  private async assemble(
+    payload: TxPayload,
+    payer: PublicKey,
+    tip: Lamports,
+    staleBlockhash?: string,
+  ): Promise<{ message: MessageV0; tipAccount: string; blockhash: string }> {
+    const blockhash = staleBlockhash ?? (await this.rpc.latestBlockhash("confirmed")).blockhash;
     const tipAccount = this.tipAccount();
     const message = new TransactionMessage({
       payerKey: payer,
@@ -58,11 +66,30 @@ export class BundleBuilder {
         SystemProgram.transfer({ fromPubkey: payer, toPubkey: tipAccount, lamports: tip }),
       ],
     }).compileToV0Message();
+    return { message, tipAccount: tipAccount.toBase58(), blockhash };
+  }
+
+  async buildUnsigned(payload: TxPayload, payer: PublicKey, tip: Lamports): Promise<UnsignedBundle> {
+    const { message, tipAccount, blockhash } = await this.assemble(payload, payer, tip);
     return {
       messageBase64: Buffer.from(message.serialize()).toString("base64"),
-      tipAccount: tipAccount.toBase58(),
+      tipAccount,
       tip,
       blockhash,
     };
+  }
+
+  async buildAndSign(
+    payload: TxPayload,
+    signer: Signer,
+    tip: Lamports,
+    staleBlockhash?: string,
+  ): Promise<{ base64: string; signature: string }> {
+    const payer = new PublicKey(signer.publicKey);
+    const { message } = await this.assemble(payload, payer, tip, staleBlockhash);
+    const tx = new VersionedTransaction(message);
+    const sig = await signer.sign(message.serialize());
+    tx.addSignature(payer, sig);
+    return { base64: Buffer.from(tx.serialize()).toString("base64"), signature: bs58.encode(sig) };
   }
 }

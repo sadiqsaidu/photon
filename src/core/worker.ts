@@ -1,14 +1,19 @@
-import type { BundleGateway, DecisionPort, StreamSource } from "../shared/ports.js";
-import type { Lifecycle } from "../shared/types.js";
+import type { BundleGateway, DecisionPort, StreamSource, TipPolicy } from "../shared/ports.js";
+import type { DecisionTrace, Lamports, Lifecycle } from "../shared/types.js";
 import type { Store } from "../db/store.js";
+import type { SubmitContext } from "./submission.js";
 import { info, warn } from "../shared/log.js";
 import { LifecycleTracker } from "./lifecycle.js";
 import { LeaderWindow } from "./leader.js";
 import { TipOracle } from "./tip-oracle.js";
 
-export class Worker {
+const JITO_MIN_TIP = 1000;
+
+export class Worker implements SubmitContext {
   private readonly tracker: LifecycleTracker;
-  private slotsToLeader = 0;
+  private policy: TipPolicy | null = null;
+  private slots = 0;
+  onSubmittedFailure?: (l: Lifecycle) => Promise<void>;
 
   constructor(
     private readonly stream: StreamSource,
@@ -17,19 +22,40 @@ export class Worker {
     private readonly leader: LeaderWindow,
     private readonly agent: DecisionPort,
     private readonly store: Store,
+    private readonly tipCeiling: number,
   ) {
     this.tracker = new LifecycleTracker((l) => void this.onSettled(l));
   }
 
-  async start(): Promise<void> {
-    await this.refreshPolicy();
+  track(l: Lifecycle, ttlMs: number): void {
+    this.tracker.track(l, ttlMs);
+  }
+
+  slotsToLeader(): number {
+    return this.slots;
+  }
+
+  tip(): { tip: Lamports; trace: DecisionTrace | null } {
+    const floor = this.oracle.floor();
+    const p = this.policy;
+    const base = p ? floor[p.anchor] * p.multiplier : floor.p50;
+    const ceiling = Math.min(p?.ceiling ?? this.tipCeiling, this.tipCeiling);
+    return { tip: Math.max(JITO_MIN_TIP, Math.min(Math.round(base), ceiling)), trace: p?.trace ?? null };
+  }
+
+  start(): void {
+    void this.refreshPolicy();
     setInterval(() => void this.refreshPolicy(), 5000);
+    void this.consume();
+  }
+
+  private async consume(): Promise<void> {
     for await (const ev of this.stream.events()) {
       if (ev.kind === "slot") {
         this.leader.observe(ev.slot);
         this.tracker.onSlot(ev.slot, ev.commitment);
       } else {
-        this.tracker.observe(ev.signature, ev.slot, ev.err);
+        this.tracker.onTx(ev.signature, ev.slot, ev.err);
       }
     }
   }
@@ -38,18 +64,18 @@ export class Worker {
     try {
       const floor = await this.oracle.refresh();
       const { slotsToLeader } = await this.leader.status();
-      this.slotsToLeader = slotsToLeader;
-      const policy = await this.agent.tipPolicy({
+      this.slots = slotsToLeader;
+      this.policy = await this.agent.tipPolicy({
         floor,
         landRate: this.oracle.landRate(),
         inFlight: this.tracker.active(),
         slotsToLeader,
       });
-      await this.store.saveDecision("tip_policy", { floor, slotsToLeader }, policy, policy.trace);
+      await this.store.saveDecision("tip_policy", { floor, slotsToLeader }, this.policy, this.policy.trace);
       info("agent", "tip policy", {
-        anchor: policy.anchor,
-        multiplier: policy.multiplier,
-        reasoning: policy.trace.reasoning,
+        anchor: this.policy.anchor,
+        multiplier: this.policy.multiplier,
+        reasoning: this.policy.trace.reasoning,
       });
     } catch (e) {
       warn("agent", "policy refresh failed", String(e));
@@ -60,11 +86,15 @@ export class Worker {
     this.oracle.observe(l.failure === null);
     await this.store.saveLifecycle(l);
     if (l.failure === null) return;
+    if (l.source === "submitted") {
+      await this.onSubmittedFailure?.(l);
+      return;
+    }
     const decision = await this.agent.recover({
       failure: l.failure,
       lastTip: l.tip,
       floor: this.oracle.floor(),
-      slotsToLeader: this.slotsToLeader,
+      slotsToLeader: this.slots,
       attempt: 1,
     });
     await this.store.saveDecision("failure_reasoning", { signature: l.signature, failure: l.failure }, decision, decision.trace);

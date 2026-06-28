@@ -1,20 +1,59 @@
 import { PublicKey } from "@solana/web3.js";
-import { loadConfig } from "./config.js";
+import { loadConfig, type Config } from "./config.js";
 import { Yellowstone } from "./adapters/yellowstone.js";
 import { JitoEngine } from "./adapters/jito.js";
 import { SolanaRpc } from "./adapters/rpc.js";
 import { Gemini } from "./adapters/gemini.js";
+import { signerFromSecret } from "./adapters/signer.js";
 import { Agent } from "./agent/index.js";
 import { BundleBuilder, SelfTransferMemo } from "./core/builder.js";
 import { TipOracle } from "./core/tip-oracle.js";
 import { LeaderWindow } from "./core/leader.js";
 import { Worker } from "./core/worker.js";
+import { Submitter } from "./core/submission.js";
 import { makeDb } from "./db/index.js";
 import { Store } from "./db/store.js";
 import { info } from "./shared/log.js";
 
-async function construct(): Promise<void> {
-  const cfg = loadConfig();
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function stack(cfg: Config) {
+  if (!cfg.geminiKey) throw new Error("missing env GEMINI_API_KEY");
+  const rpc = new SolanaRpc(cfg.rpcUrl);
+  const jito = new JitoEngine(cfg.jitoEngine);
+  const store = new Store(makeDb(cfg.databaseUrl));
+  const stream = new Yellowstone(cfg.grpcUrl, cfg.grpcToken, cfg.watchAccount);
+  const oracle = new TipOracle();
+  const leader = new LeaderWindow(jito);
+  const agent = new Agent(new Gemini(cfg.geminiKey), cfg.geminiModel, cfg.tipCeiling);
+  const worker = new Worker(stream, jito, oracle, leader, agent, store, cfg.tipCeiling);
+  return { rpc, jito, store, oracle, agent, worker };
+}
+
+async function observe(cfg: Config): Promise<void> {
+  const { worker } = stack(cfg);
+  info("main", "watching account", { account: cfg.watchAccount });
+  worker.start();
+}
+
+async function submitMode(cfg: Config, fault: boolean): Promise<void> {
+  if (!cfg.walletSecret) throw new Error("set WALLET_SECRET (throwaway) to run submit/fault");
+  const s = stack(cfg);
+  const signer = signerFromSecret(cfg.walletSecret);
+  const builder = new BundleBuilder(s.rpc, await s.jito.tipAccounts());
+  const submitter = new Submitter(builder, s.jito, signer, s.agent, s.oracle, s.store, s.worker);
+  s.worker.onSubmittedFailure = (l) => submitter.onFailure(l);
+  s.worker.start();
+
+  const runs = fault ? 1 : 10;
+  info("main", "submitting", { wallet: signer.publicKey, runs, fault });
+  for (let i = 0; i < runs; i++) {
+    await submitter.submit(new SelfTransferMemo(), fault ? { fault: true, ttlMs: 15_000 } : {});
+    await sleep(8000);
+  }
+}
+
+async function construct(cfg: Config): Promise<void> {
   if (!cfg.walletPubkey) throw new Error("set WALLET_PUBKEY to build an unsigned bundle");
   const jito = new JitoEngine(cfg.jitoEngine);
   const builder = new BundleBuilder(new SolanaRpc(cfg.rpcUrl), await jito.tipAccounts());
@@ -22,20 +61,18 @@ async function construct(): Promise<void> {
   info("construct", "unsigned bundle ready (sign client-side)", unsigned);
 }
 
-async function observe(): Promise<void> {
-  const cfg = loadConfig();
-  if (!cfg.geminiKey) throw new Error("missing env GEMINI_API_KEY");
-  const store = new Store(makeDb(cfg.databaseUrl));
-  const jito = new JitoEngine(cfg.jitoEngine);
-  const stream = new Yellowstone(cfg.grpcUrl, cfg.grpcToken, cfg.watchAccount);
-  const agent = new Agent(new Gemini(cfg.geminiKey), cfg.geminiModel, cfg.tipCeiling);
-  const worker = new Worker(stream, jito, new TipOracle(), new LeaderWindow(jito), agent, store);
-  info("main", "watching account", { account: cfg.watchAccount });
-  await worker.start();
-}
+const cfg = loadConfig();
+const mode = process.argv[2];
+const run =
+  mode === "construct"
+    ? construct(cfg)
+    : mode === "submit"
+      ? submitMode(cfg, false)
+      : mode === "fault"
+        ? submitMode(cfg, true)
+        : observe(cfg);
 
-const run = process.argv[2] === "construct" ? construct : observe;
-run().catch((e: unknown) => {
+run.catch((e: unknown) => {
   console.error(e);
   process.exit(1);
 });
