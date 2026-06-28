@@ -12,6 +12,7 @@ export interface Config {
   walletSecret: string | undefined;
   databaseUrl: string;
   tipCeiling: number;
+  port: number;
 }
 
 function req(name: string): string {
@@ -33,5 +34,6 @@ export function loadConfig(): Config {
     walletSecret: process.env.WALLET_SECRET,
     databaseUrl: req("DATABASE_URL"),
     tipCeiling: Number(process.env.TIP_CEILING_LAMPORTS ?? 200_000),
+    port: Number(process.env.PORT ?? 8080),
   };
 }

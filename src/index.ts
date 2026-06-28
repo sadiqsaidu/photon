@@ -11,6 +11,7 @@ import { TipOracle } from "./core/tip-oracle.js";
 import { LeaderWindow } from "./core/leader.js";
 import { Worker } from "./core/worker.js";
 import { Submitter } from "./core/submission.js";
+import { createApi } from "./api/server.js";
 import { makeDb } from "./db/index.js";
 import { Store } from "./db/store.js";
 import { info } from "./shared/log.js";
@@ -53,6 +54,18 @@ async function submitMode(cfg: Config, fault: boolean): Promise<void> {
   }
 }
 
+async function serve(cfg: Config): Promise<void> {
+  const s = stack(cfg);
+  const builder = new BundleBuilder(s.rpc, await s.jito.tipAccounts());
+  const signer = cfg.walletSecret ? signerFromSecret(cfg.walletSecret) : undefined;
+  const submitter = new Submitter(builder, s.jito, signer, s.agent, s.oracle, s.store, s.worker);
+  s.worker.onSubmittedFailure = (l) => submitter.onFailure(l);
+  s.worker.start();
+
+  const api = createApi({ builder, submitter, defaultTip: () => s.worker.tip().tip, hasSigner: Boolean(signer) });
+  api.listen(cfg.port, () => info("api", "listening", { port: cfg.port, watch: cfg.watchAccount }));
+}
+
 async function construct(cfg: Config): Promise<void> {
   if (!cfg.walletPubkey) throw new Error("set WALLET_PUBKEY to build an unsigned bundle");
   const jito = new JitoEngine(cfg.jitoEngine);
@@ -64,13 +77,15 @@ async function construct(cfg: Config): Promise<void> {
 const cfg = loadConfig();
 const mode = process.argv[2];
 const run =
-  mode === "construct"
-    ? construct(cfg)
-    : mode === "submit"
-      ? submitMode(cfg, false)
-      : mode === "fault"
-        ? submitMode(cfg, true)
-        : observe(cfg);
+  mode === "serve"
+    ? serve(cfg)
+    : mode === "construct"
+      ? construct(cfg)
+      : mode === "submit"
+        ? submitMode(cfg, false)
+        : mode === "fault"
+          ? submitMode(cfg, true)
+          : observe(cfg);
 
 run.catch((e: unknown) => {
   console.error(e);

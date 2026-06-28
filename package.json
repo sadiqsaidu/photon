@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc",
     "start": "tsx src/index.ts",
+    "serve": "tsx src/index.ts serve",
     "construct": "tsx src/index.ts construct",
     "submit": "tsx src/index.ts submit",
     "fault": "tsx src/index.ts fault",

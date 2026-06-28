@@ -3,6 +3,7 @@ import type { DecisionTrace, Lamports, Lifecycle } from "../shared/types.js";
 import type { Store } from "../db/store.js";
 import type { SubmitContext } from "./submission.js";
 import { info, warn } from "../shared/log.js";
+import { bus } from "../shared/bus.js";
 import { LifecycleTracker } from "./lifecycle.js";
 import { LeaderWindow } from "./leader.js";
 import { TipOracle } from "./tip-oracle.js";
@@ -24,7 +25,22 @@ export class Worker implements SubmitContext {
     private readonly store: Store,
     private readonly tipCeiling: number,
   ) {
-    this.tracker = new LifecycleTracker((l) => void this.onSettled(l));
+    this.tracker = new LifecycleTracker(
+      (l) => void this.onSettled(l),
+      (l) => this.publishLifecycle(l),
+    );
+  }
+
+  private publishLifecycle(l: Lifecycle): void {
+    bus.publish({
+      type: "lifecycle",
+      signature: l.signature,
+      source: l.source,
+      stages: l.stages,
+      tip: l.tip,
+      failure: l.failure,
+      retryOf: l.retryOf,
+    });
   }
 
   track(l: Lifecycle, ttlMs: number): void {
@@ -54,6 +70,7 @@ export class Worker implements SubmitContext {
       if (ev.kind === "slot") {
         this.leader.observe(ev.slot);
         this.tracker.onSlot(ev.slot, ev.commitment);
+        bus.publish({ type: "slot", slot: ev.slot, commitment: ev.commitment });
       } else {
         this.tracker.onTx(ev.signature, ev.slot, ev.err);
       }
@@ -72,6 +89,14 @@ export class Worker implements SubmitContext {
         slotsToLeader,
       });
       await this.store.saveDecision("tip_policy", { floor, slotsToLeader }, this.policy, this.policy.trace);
+      bus.publish({
+        type: "tip_policy",
+        anchor: this.policy.anchor,
+        multiplier: this.policy.multiplier,
+        tip: this.tip().tip,
+        reasoning: this.policy.trace.reasoning,
+        confidence: this.policy.trace.confidence,
+      });
       info("agent", "tip policy", {
         anchor: this.policy.anchor,
         multiplier: this.policy.multiplier,
@@ -98,6 +123,14 @@ export class Worker implements SubmitContext {
       attempt: 1,
     });
     await this.store.saveDecision("failure_reasoning", { signature: l.signature, failure: l.failure }, decision, decision.trace);
+    bus.publish({
+      type: "agent",
+      kind: "failure_reasoning",
+      signature: l.signature,
+      action: decision.action,
+      reasoning: decision.trace.reasoning,
+      confidence: decision.trace.confidence,
+    });
     info("agent", "failure reasoning", {
       signature: l.signature,
       failure: l.failure,

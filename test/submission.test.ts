@@ -83,6 +83,25 @@ test("onFailure consults the agent and resubmits", async () => {
   assert.equal(tracked[1]!.tip, 7000);
 });
 
+test("submitSigned sends and tracks an externally-signed bundle without auto-retry", async () => {
+  const sent: string[][] = [];
+  const tracked: Lifecycle[] = [];
+  const builder = new BundleBuilder(rpc, [TIP_ACCOUNT]);
+  const agent: DecisionPort = { tipPolicy: noTipPolicy, async recover() { throw new Error("not used"); } };
+  const sub = new Submitter(builder, jitoMock(sent), undefined, agent, new TipOracle(), storeMock, ctxMock(tracked));
+
+  const bundleId = await sub.submitSigned({ signedTx: "QkFTRTY0", signature: "sigExt", tip: 4000 });
+  assert.equal(sent.length, 1);
+  assert.equal(bundleId, "bundle-1");
+  assert.equal(tracked[0]!.signature, "sigExt");
+  assert.equal(tracked[0]!.source, "submitted");
+
+  const l = tracked[0]!;
+  l.failure = "bundle_dropped";
+  await sub.onFailure(l);
+  assert.equal(sent.length, 1);
+});
+
 test("onFailure stops after the attempt cap", async () => {
   const sent: string[][] = [];
   const tracked: Lifecycle[] = [];

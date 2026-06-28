@@ -84,6 +84,7 @@ flowchart TB
 | **Bundle Builder** | Builds an unsigned bundle (compute budget + payload + Jito tip, `confirmed` blockhash). Signing is external. Exercised today via `npm run construct`. |
 | **Agent (`DecisionPort`)** | `tipPolicy()` — a continuously refreshed, reasoned tip policy. `recover()` — reasons about a failure and what it would change. One Gemini model. |
 | **Store** | Persists sealed lifecycles and every agent decision to Postgres (Drizzle) and appends a JSONL export. |
+| **Event Bus + API** | An in-process typed bus that core components publish to (`slot`, `lifecycle`, `tip_policy`, `agent`, `stream`). A `node:http` server exposes it as an SSE firehose plus REST (`/bundle/prepare`, `/bundle/submit`, `/fault`) for the dashboard. |
 
 ---
 

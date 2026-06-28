@@ -69,6 +69,24 @@ npm run submit       # submit real bundles and track them to finalization
 npm run fault        # inject a blockhash expiry; the agent recovers autonomously
 ```
 
+## Realtime API (serve mode)
+
+```bash
+npm run serve        # run the worker + HTTP API (default port 8080)
+```
+
+The dashboard consumes this. Signing stays client-side: the frontend calls
+`/bundle/prepare` to get an unsigned bundle, the wallet signs it, and the
+frontend posts the signed transaction to `/bundle/submit`.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/health` | Liveness + whether a server signer is present |
+| GET | `/events` | SSE firehose: `slot`, `lifecycle`, `tip_policy`, `agent`, `stream` events |
+| POST | `/bundle/prepare` | `{ payer, tip? }` → unsigned bundle for the wallet to sign |
+| POST | `/bundle/submit` | `{ signedTx, signature, tip }` → submits to Jito and tracks it |
+| POST | `/fault` | Inject a blockhash-expiry failure (local-signer demo only) |
+
 The observer follows live transactions through `processed → confirmed →
 finalized`, records real latency deltas, and runs the agent continuously. Sealed
 lifecycles and every agent decision are written to Postgres (`lifecycles`,

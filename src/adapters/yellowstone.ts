@@ -3,6 +3,7 @@ import bs58 from "bs58";
 import type { StreamSource } from "../shared/ports.js";
 import type { Commitment, StreamEvent } from "../shared/types.js";
 import { warn } from "../shared/log.js";
+import { bus } from "../shared/bus.js";
 
 type Pkg = typeof import("@triton-one/yellowstone-grpc");
 type SubscribeRequest = import("@triton-one/yellowstone-grpc").SubscribeRequest;
@@ -72,6 +73,7 @@ export class Yellowstone implements StreamSource {
   private readonly client: Client;
   private readonly queue = new EventQueue();
   private closed = false;
+  private reconnects = 0;
 
   constructor(url: string, token: string | undefined, private readonly account: string) {
     this.client = new Client(url, token, {
@@ -111,6 +113,10 @@ export class Yellowstone implements StreamSource {
     }
   }
 
+  private health(connected: boolean): void {
+    bus.publish({ type: "stream", connected, dropped: this.queue.dropped, reconnects: this.reconnects });
+  }
+
   private async run(): Promise<void> {
     let backoff = 500;
     while (!this.closed) {
@@ -122,11 +128,14 @@ export class Yellowstone implements StreamSource {
           stream.on("end", resolve);
           stream.write(request(this.account), (err: unknown) => {
             if (err) reject(err);
+            else this.health(true);
           });
         });
         backoff = 500;
       } catch (e) {
         if (this.closed) return;
+        this.reconnects++;
+        this.health(false);
         warn("stream", "disconnected, reconnecting", { backoff, error: String(e) });
         if (this.queue.dropped > 0) warn("stream", "shed events under backpressure", { dropped: this.queue.dropped });
         await new Promise((r) => setTimeout(r, backoff + Math.random() * 250));

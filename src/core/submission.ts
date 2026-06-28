@@ -6,6 +6,7 @@ import type { Store } from "../db/store.js";
 import { BundleBuilder, type TxPayload } from "./builder.js";
 import { TipOracle } from "./tip-oracle.js";
 import { info, warn } from "../shared/log.js";
+import { bus } from "../shared/bus.js";
 
 const MAX_ATTEMPTS = 3;
 
@@ -29,7 +30,7 @@ export class Submitter {
   constructor(
     private readonly builder: BundleBuilder,
     private readonly jito: BundleGateway,
-    private readonly signer: Signer,
+    private readonly signer: Signer | undefined,
     private readonly agent: DecisionPort,
     private readonly oracle: TipOracle,
     private readonly store: Store,
@@ -37,9 +38,11 @@ export class Submitter {
   ) {}
 
   async submit(payload: TxPayload, opts: SubmitOptions = {}): Promise<string> {
+    const signer = this.signer;
+    if (!signer) throw new Error("no server signer; submit requires a Signer");
     const { tip, trace } = opts.tip !== undefined ? { tip: opts.tip, trace: null } : this.ctx.tip();
     const stale = opts.fault ? bs58.encode(randomBytes(32)) : undefined;
-    const { base64, signature } = await this.builder.buildAndSign(payload, this.signer, tip, stale);
+    const { base64, signature } = await this.builder.buildAndSign(payload, signer, tip, stale);
 
     let bundleId: string | null = null;
     try {
@@ -68,6 +71,34 @@ export class Submitter {
     return signature;
   }
 
+  async submitSigned(input: {
+    signedTx: string;
+    signature: string;
+    tip: Lamports;
+    payloadKind?: string;
+  }): Promise<string | null> {
+    let bundleId: string | null = null;
+    try {
+      bundleId = await this.jito.sendBundle([input.signedTx]);
+    } catch (e) {
+      warn("jito", "sendBundle rejected", String(e));
+    }
+    const l: Lifecycle = {
+      signature: input.signature,
+      source: "submitted",
+      bundleId,
+      tip: input.tip,
+      payload: input.payloadKind ?? "external",
+      stages: {},
+      failure: null,
+      retryOf: null,
+      trace: null,
+    };
+    this.ctx.track(l, 60_000);
+    info("submit", "submitted (external)", { signature: input.signature, bundleId });
+    return bundleId;
+  }
+
   async onFailure(l: Lifecycle): Promise<void> {
     const payload = this.payloads.get(l.signature);
     this.payloads.delete(l.signature);
@@ -92,6 +123,14 @@ export class Submitter {
       decision,
       decision.trace,
     );
+    bus.publish({
+      type: "agent",
+      kind: "recovery",
+      signature: l.signature,
+      action: decision.action,
+      reasoning: decision.trace.reasoning,
+      confidence: decision.trace.confidence,
+    });
     info("agent", "recovery", {
       signature: l.signature,
       failure: l.failure,
