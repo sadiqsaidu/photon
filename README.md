@@ -70,7 +70,7 @@ npm test
 | `GRPC_URL` | yes | Yellowstone gRPC endpoint (solinfra.dev). |
 | `GRPC_TOKEN` | — | Auth token for the gRPC endpoint. |
 | `GEMINI_API_KEY` | yes* | Gemini key. Required for `serve`/`start`; not needed for `construct`. |
-| `GEMINI_MODEL` | — | Model id (default `gemini-2.5-flash`). |
+| `GEMINI_MODEL` | — | Model id (default `gemini-2.0-flash`, generous free tier). |
 | `WATCH_ACCOUNT` | yes | Account whose transactions validate the lifecycle tracker. Defaults to a Jito tip account. Higher volume = more GB streamed. |
 | `DATABASE_URL` | yes | Postgres connection string. |
 | `JITO_ENGINE` | — | Jito Block Engine base URL (default Frankfurt). |

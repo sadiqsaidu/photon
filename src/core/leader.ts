@@ -9,6 +9,7 @@ export class LeaderWindow {
   private slot: Slot = 0;
   private nextLeaderSlot = 0;
   private lastFetch = 0;
+  private warned = false;
 
   constructor(private readonly jito: BundleGateway) {}
 
@@ -33,7 +34,10 @@ export class LeaderWindow {
       this.nextLeaderSlot = nextLeaderSlot;
       if (currentSlot > this.slot) this.slot = currentSlot;
     } catch (e) {
-      warn("leader", "next leader unavailable", String(e));
+      if (!this.warned) {
+        warn("leader", "next leader unavailable (window disabled)", String(e));
+        this.warned = true;
+      }
     }
   }
 }

@@ -28,7 +28,7 @@ export function loadConfig(): Config {
     grpcToken: process.env.GRPC_TOKEN,
     jitoEngine: process.env.JITO_ENGINE ?? "https://frankfurt.mainnet.block-engine.jito.wtf",
     geminiKey: process.env.GEMINI_API_KEY,
-    geminiModel: process.env.GEMINI_MODEL ?? "gemini-2.5-flash",
+    geminiModel: process.env.GEMINI_MODEL ?? "gemini-2.0-flash",
     watchAccount: req("WATCH_ACCOUNT"),
     walletPubkey: process.env.WALLET_PUBKEY,
     walletSecret: process.env.WALLET_SECRET,

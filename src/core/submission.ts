@@ -110,13 +110,19 @@ export class Submitter {
       return;
     }
 
-    const decision = await this.agent.recover({
-      failure: l.failure,
-      lastTip: l.tip,
-      floor: this.oracle.floor(),
-      slotsToLeader: this.ctx.slotsToLeader(),
-      attempt,
-    });
+    let decision;
+    try {
+      decision = await this.agent.recover({
+        failure: l.failure,
+        lastTip: l.tip,
+        floor: this.oracle.floor(),
+        slotsToLeader: this.ctx.slotsToLeader(),
+        attempt,
+      });
+    } catch (e) {
+      warn("agent", "recovery failed", String(e));
+      return;
+    }
     await this.store.saveDecision(
       "recovery",
       { signature: l.signature, failure: l.failure },

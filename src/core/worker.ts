@@ -61,7 +61,7 @@ export class Worker implements SubmitContext {
 
   start(): void {
     void this.refreshPolicy();
-    setInterval(() => void this.refreshPolicy(), 5000);
+    setInterval(() => void this.refreshPolicy(), 20_000);
     void this.consume();
   }
 
@@ -109,33 +109,10 @@ export class Worker implements SubmitContext {
 
   private async onSettled(l: Lifecycle): Promise<void> {
     this.oracle.observe(l.failure === null);
+    this.publishLifecycle(l);
     await this.store.saveLifecycle(l);
-    if (l.failure === null) return;
-    if (l.source === "submitted") {
-      await this.onSubmittedFailure?.(l);
-      return;
-    }
-    const decision = await this.agent.recover({
-      failure: l.failure,
-      lastTip: l.tip,
-      floor: this.oracle.floor(),
-      slotsToLeader: this.slots,
-      attempt: 1,
-    });
-    await this.store.saveDecision("failure_reasoning", { signature: l.signature, failure: l.failure }, decision, decision.trace);
-    bus.publish({
-      type: "agent",
-      kind: "failure_reasoning",
-      signature: l.signature,
-      action: decision.action,
-      reasoning: decision.trace.reasoning,
-      confidence: decision.trace.confidence,
-    });
-    info("agent", "failure reasoning", {
-      signature: l.signature,
-      failure: l.failure,
-      action: decision.action,
-      reasoning: decision.trace.reasoning,
-    });
+    // The agent only reasons about our own submitted bundles. Observed
+    // third-party failures are classified and recorded, but not sent to the LLM.
+    if (l.failure && l.source === "submitted") await this.onSubmittedFailure?.(l);
   }
 }

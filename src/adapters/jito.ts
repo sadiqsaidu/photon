@@ -7,7 +7,9 @@ async function call<T>(url: string, method: string, params: unknown[]): Promise<
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
   });
-  const body = (await res.json()) as { result?: T; error?: { message: string } };
+  const text = await res.text();
+  if (!res.ok) throw new Error(`jito ${method}: HTTP ${res.status}`);
+  const body = (text ? JSON.parse(text) : {}) as { result?: T; error?: { message: string } };
   if (body.error) throw new Error(`jito ${method}: ${body.error.message}`);
   return body.result as T;
 }
