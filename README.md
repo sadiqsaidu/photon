@@ -69,8 +69,12 @@ npm test
 | `RPC_URL` | yes | Solana mainnet JSON-RPC (Helius free tier). |
 | `GRPC_URL` | yes | Yellowstone gRPC endpoint (solinfra.dev). |
 | `GRPC_TOKEN` | — | Auth token for the gRPC endpoint. |
-| `GEMINI_API_KEY` | yes* | Gemini key. Required for `serve`/`start`; not needed for `construct`. |
-| `GEMINI_MODEL` | — | Model id (default `gemini-2.0-flash`, generous free tier). |
+| `OPENROUTER_API_KEY` | yes* | OpenRouter key. If set, OpenRouter is used for the agent. |
+| `OPENROUTER_MODEL` | — | Model id (default `meta-llama/llama-3.3-70b-instruct:free`; any `:free` model works). |
+| `GEMINI_API_KEY` | yes* | Gemini key. Used only if `OPENROUTER_API_KEY` is empty. |
+| `GEMINI_MODEL` | — | Model id (default `gemini-2.0-flash`). |
+
+\* The agent needs **one** LLM provider — set either `OPENROUTER_API_KEY` or `GEMINI_API_KEY` (not needed for `construct`).
 | `WATCH_ACCOUNT` | yes | Account whose transactions validate the lifecycle tracker. Defaults to a Jito tip account. Higher volume = more GB streamed. |
 | `DATABASE_URL` | yes | Postgres connection string. |
 | `JITO_ENGINE` | — | Jito Block Engine base URL (default Frankfurt). |

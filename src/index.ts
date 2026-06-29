@@ -4,8 +4,10 @@ import { Yellowstone } from "./adapters/yellowstone.js";
 import { JitoEngine } from "./adapters/jito.js";
 import { SolanaRpc } from "./adapters/rpc.js";
 import { Gemini } from "./adapters/gemini.js";
+import { OpenRouter } from "./adapters/openrouter.js";
 import { signerFromSecret } from "./adapters/signer.js";
 import { Agent } from "./agent/index.js";
+import type { LlmClient } from "./shared/ports.js";
 import { BundleBuilder, SelfTransferMemo } from "./core/builder.js";
 import { TipOracle } from "./core/tip-oracle.js";
 import { LeaderWindow } from "./core/leader.js";
@@ -18,15 +20,21 @@ import { info } from "./shared/log.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+function makeLlm(cfg: Config): { client: LlmClient; model: string } {
+  if (cfg.openrouterKey) return { client: new OpenRouter(cfg.openrouterKey), model: cfg.openrouterModel };
+  if (cfg.geminiKey) return { client: new Gemini(cfg.geminiKey), model: cfg.geminiModel };
+  throw new Error("set OPENROUTER_API_KEY or GEMINI_API_KEY");
+}
+
 function stack(cfg: Config) {
-  if (!cfg.geminiKey) throw new Error("missing env GEMINI_API_KEY");
   const rpc = new SolanaRpc(cfg.rpcUrl);
   const jito = new JitoEngine(cfg.jitoEngine);
   const store = new Store(makeDb(cfg.databaseUrl));
   const stream = new Yellowstone(cfg.grpcUrl, cfg.grpcToken, cfg.watchAccount);
   const oracle = new TipOracle();
   const leader = new LeaderWindow(jito);
-  const agent = new Agent(new Gemini(cfg.geminiKey), cfg.geminiModel, cfg.tipCeiling);
+  const llm = makeLlm(cfg);
+  const agent = new Agent(llm.client, llm.model, cfg.tipCeiling);
   const worker = new Worker(stream, jito, oracle, leader, agent, store, cfg.tipCeiling);
   return { rpc, jito, store, oracle, agent, worker };
 }

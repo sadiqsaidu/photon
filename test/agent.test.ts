@@ -22,6 +22,14 @@ test("tipPolicy parses a valid response", async () => {
   assert.equal(p.trace.reasoning, "busy");
 });
 
+test("tipPolicy parses JSON wrapped in markdown fences", async () => {
+  const fenced = "Here you go:\n```json\n" + JSON.stringify({ anchor: "p95", multiplier: 2, ceiling: 40_000 }) + "\n```";
+  const a = new Agent(llm(fenced), "m", 200_000);
+  const p = await a.tipPolicy({ floor, landRate: 0.5, inFlight: 1, slotsToLeader: 1 });
+  assert.equal(p.anchor, "p95");
+  assert.equal(p.multiplier, 2);
+});
+
 test("tipPolicy falls back safely on garbage", async () => {
   const a = new Agent(llm("not json"), "m", 200_000);
   const p = await a.tipPolicy({ floor, landRate: 1, inFlight: 0, slotsToLeader: 0 });

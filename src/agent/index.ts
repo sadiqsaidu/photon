@@ -15,8 +15,14 @@ const num = (v: unknown, d: number) => (typeof v === "number" && Number.isFinite
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 
 function parse(raw: string): Record<string, unknown> {
+  let text = raw.trim();
+  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence && fence[1]) text = fence[1].trim();
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start !== -1 && end > start) text = text.slice(start, end + 1);
   try {
-    const v = JSON.parse(raw) as unknown;
+    const v = JSON.parse(text) as unknown;
     return v && typeof v === "object" ? (v as Record<string, unknown>) : {};
   } catch {
     return {};
