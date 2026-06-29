@@ -28,7 +28,19 @@ export type PhotonEvent =
     }
   | { type: "tip_policy"; anchor: string; multiplier: number; tip: number; reasoning: string; confidence: number }
   | { type: "agent"; kind: "recovery" | "failure_reasoning"; signature: string; action: string; reasoning: string; confidence: number }
-  | { type: "stream"; connected: boolean; dropped: number; reconnects: number };
+  | { type: "stream"; connected: boolean; dropped: number; reconnects: number }
+  | {
+      type: "network";
+      slot: number;
+      leader: string | null;
+      leaderIsJito: boolean;
+      nextLeader: string | null;
+      nextIsJito: boolean;
+      epoch: number;
+      epochProgress: number;
+      tps: number;
+      tipFloor: number;
+    };
 
 export const STAGES: Stage[] = ["submitted", "processed", "confirmed", "finalized"];
 

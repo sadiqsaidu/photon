@@ -90,7 +90,7 @@ test("submitSigned sends and tracks an externally-signed bundle without auto-ret
   const agent: DecisionPort = { tipPolicy: noTipPolicy, async recover() { throw new Error("not used"); } };
   const sub = new Submitter(builder, jitoMock(sent), undefined, agent, new TipOracle(), storeMock, ctxMock(tracked));
 
-  const bundleId = await sub.submitSigned({ signedTx: "QkFTRTY0", signature: "sigExt", tip: 4000 });
+  const bundleId = await sub.submitSigned({ signedTxs: ["QkFTRTY0"], signature: "sigExt", tip: 4000 });
   assert.equal(sent.length, 1);
   assert.equal(bundleId, "bundle-1");
   assert.equal(tracked[0]!.signature, "sigExt");

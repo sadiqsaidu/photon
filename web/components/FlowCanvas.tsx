@@ -131,10 +131,10 @@ export function FlowCanvas() {
   }, [subscribe]);
 
   return (
-    <div className="card h-72">
+    <div className="card h-80">
       <div className="mb-1 flex items-center justify-between">
-        <span className="label">bundle flow</span>
-        <span className="text-[11px] text-zinc-500">live</span>
+        <span className="label">network activity</span>
+        <span className="text-[11px] text-zinc-500">observed transactions · live</span>
       </div>
       <canvas ref={canvasRef} className="h-[calc(100%-1.5rem)] w-full" />
     </div>

@@ -11,6 +11,7 @@ import type { LlmClient } from "./shared/ports.js";
 import { BundleBuilder, SelfTransferMemo } from "./core/builder.js";
 import { TipOracle } from "./core/tip-oracle.js";
 import { LeaderWindow } from "./core/leader.js";
+import { NetworkMonitor } from "./core/network.js";
 import { Worker } from "./core/worker.js";
 import { Submitter } from "./core/submission.js";
 import { createApi } from "./api/server.js";
@@ -36,13 +37,15 @@ function stack(cfg: Config) {
   const llm = makeLlm(cfg);
   const agent = new Agent(llm.client, llm.model, cfg.tipCeiling);
   const worker = new Worker(stream, jito, oracle, leader, agent, store, cfg.tipCeiling);
-  return { rpc, jito, store, oracle, agent, worker };
+  const monitor = new NetworkMonitor(rpc, oracle);
+  return { rpc, jito, store, oracle, agent, worker, monitor };
 }
 
 async function observe(cfg: Config): Promise<void> {
-  const { worker } = stack(cfg);
+  const { worker, monitor } = stack(cfg);
   info("main", "watching account", { account: cfg.watchAccount });
   worker.start();
+  monitor.start();
 }
 
 async function submitMode(cfg: Config, fault: boolean): Promise<void> {
@@ -69,6 +72,7 @@ async function serve(cfg: Config): Promise<void> {
   const submitter = new Submitter(builder, s.jito, signer, s.agent, s.oracle, s.store, s.worker);
   s.worker.onSubmittedFailure = (l) => submitter.onFailure(l);
   s.worker.start();
+  s.monitor.start();
 
   const api = createApi({ builder, submitter, defaultTip: () => s.worker.tip().tip, hasSigner: Boolean(signer) });
   api.listen(cfg.port, () => info("api", "listening", { port: cfg.port, watch: cfg.watchAccount }));

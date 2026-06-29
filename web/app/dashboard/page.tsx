@@ -1,34 +1,36 @@
 "use client";
 
 import { TopBar } from "@/components/TopBar";
-import { LifecycleStrip } from "@/components/LifecycleStrip";
-import { StatusCards } from "@/components/StatusCards";
+import { NetworkBar } from "@/components/NetworkBar";
+import { StatusGrid } from "@/components/StatusGrid";
 import { FlowCanvas } from "@/components/FlowCanvas";
 import { TheMind } from "@/components/TheMind";
-import { LifecycleLog } from "@/components/LifecycleLog";
-import { SubmitPanel } from "@/components/SubmitPanel";
+import { BundleBuilder } from "@/components/BundleBuilder";
+import { BundleJourney } from "@/components/BundleJourney";
+import { BundleLog } from "@/components/BundleLog";
 
 export default function Dashboard() {
   return (
-    <div className="grid-bg min-h-screen">
+    <div className="flex min-h-screen flex-col">
       <TopBar />
-      <main className="mx-auto max-w-7xl space-y-4 px-5 py-5">
-        <LifecycleStrip />
-        <StatusCards />
+      <NetworkBar />
+      <main className="flex-1 space-y-4 px-5 py-4">
+        <StatusGrid />
 
         <div className="grid gap-4 lg:grid-cols-3">
           <div className="lg:col-span-2">
             <FlowCanvas />
           </div>
-          <div className="lg:row-span-2">
-            <TheMind />
-          </div>
-          <div className="lg:col-span-2">
-            <LifecycleLog />
-          </div>
+          <TheMind />
         </div>
 
-        <SubmitPanel />
+        <div className="grid gap-4 lg:grid-cols-3">
+          <div className="space-y-4 lg:col-span-2">
+            <BundleJourney />
+            <BundleLog />
+          </div>
+          <BundleBuilder />
+        </div>
       </main>
     </div>
   );

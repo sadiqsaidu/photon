@@ -31,6 +31,32 @@ export class SelfTransferMemo implements TxPayload {
   }
 }
 
+export class SolTransfer implements TxPayload {
+  readonly kind = "sol_transfer";
+  readonly computeUnits = 20_000;
+
+  constructor(
+    private readonly to: string,
+    private readonly lamports: number,
+  ) {}
+
+  build(payer: PublicKey): TransactionInstruction[] {
+    return [
+      SystemProgram.transfer({ fromPubkey: payer, toPubkey: new PublicKey(this.to), lamports: this.lamports }),
+    ];
+  }
+}
+
+export function payloadFrom(spec: unknown): TxPayload {
+  if (spec && typeof spec === "object") {
+    const s = spec as { kind?: string; to?: string; lamports?: number };
+    if (s.kind === "sol_transfer" && s.to && typeof s.lamports === "number") {
+      return new SolTransfer(s.to, s.lamports);
+    }
+  }
+  return new SelfTransferMemo();
+}
+
 export interface UnsignedBundle {
   messageBase64: string;
   tipAccount: string;

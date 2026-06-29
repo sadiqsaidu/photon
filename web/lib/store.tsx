@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useReducer, useRef, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { API_BASE } from "./api";
 import type { Commitment, FailureClass, PhotonEvent, Stage, StageMark } from "./events";
 
@@ -31,44 +31,67 @@ export interface TipPolicy {
   confidence: number;
 }
 
+export interface NetworkState {
+  slot: number;
+  leader: string | null;
+  leaderIsJito: boolean;
+  nextLeader: string | null;
+  nextIsJito: boolean;
+  epoch: number;
+  epochProgress: number;
+  tps: number;
+  tipFloor: number;
+}
+
 interface State {
   slot: number;
   commitment: Commitment;
+  network: NetworkState | null;
   lifecycles: Record<string, Lifecycle>;
   order: string[];
   tipPolicy: TipPolicy | null;
   agent: AgentEntry[];
-  stream: { connected: boolean; dropped: number; reconnects: number };
   healthMs: number | null;
+  lastEventAt: number;
 }
 
-const MAX = 60;
+const MAX = 80;
 
 const initial: State = {
   slot: 0,
   commitment: "processed",
+  network: null,
   lifecycles: {},
   order: [],
   tipPolicy: null,
   agent: [],
-  stream: { connected: false, dropped: 0, reconnects: 0 },
   healthMs: null,
+  lastEventAt: 0,
 };
 
-function reduce(s: State, ev: PhotonEvent): State {
+function reduceInner(s: State, ev: PhotonEvent): State {
   switch (ev.type) {
     case "slot":
       return { ...s, slot: ev.slot, commitment: ev.commitment };
+    case "network":
+      return {
+        ...s,
+        network: {
+          slot: ev.slot,
+          leader: ev.leader,
+          leaderIsJito: ev.leaderIsJito,
+          nextLeader: ev.nextLeader,
+          nextIsJito: ev.nextIsJito,
+          epoch: ev.epoch,
+          epochProgress: ev.epochProgress,
+          tps: ev.tps,
+          tipFloor: ev.tipFloor,
+        },
+      };
     case "tip_policy":
       return {
         ...s,
-        tipPolicy: {
-          anchor: ev.anchor,
-          multiplier: ev.multiplier,
-          tip: ev.tip,
-          reasoning: ev.reasoning,
-          confidence: ev.confidence,
-        },
+        tipPolicy: { anchor: ev.anchor, multiplier: ev.multiplier, tip: ev.tip, reasoning: ev.reasoning, confidence: ev.confidence },
       };
     case "agent":
       return {
@@ -79,7 +102,7 @@ function reduce(s: State, ev: PhotonEvent): State {
         ].slice(0, MAX),
       };
     case "stream":
-      return { ...s, stream: { connected: ev.connected, dropped: ev.dropped, reconnects: ev.reconnects } };
+      return s;
     case "lifecycle": {
       const prev = s.lifecycles[ev.signature];
       const lifecycles = {
@@ -114,6 +137,10 @@ function reduce(s: State, ev: PhotonEvent): State {
     default:
       return s;
   }
+}
+
+function reduce(s: State, ev: PhotonEvent): State {
+  return { ...reduceInner(s, ev), lastEventAt: Date.now() };
 }
 
 interface Ctx {
@@ -155,18 +182,32 @@ export function useStore(): Ctx {
   return c;
 }
 
+// Live if we received any event in the last 8s (ticks every second).
+export function useLive(lastEventAt: number): boolean {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return lastEventAt > 0 && now - lastEventAt < 8000;
+}
+
 export function recentLifecycles(s: State): Lifecycle[] {
   return s.order.map((sig) => s.lifecycles[sig]).filter((l): l is Lifecycle => Boolean(l));
 }
 
-export function counts(s: State): { landed: number; failed: number; inFlight: number } {
+export function yourBundles(s: State): Lifecycle[] {
+  return recentLifecycles(s).filter((l) => l.source === "submitted");
+}
+
+export function bundleCounts(s: State): { landed: number; failed: number; inFlight: number } {
   let landed = 0;
   let failed = 0;
   let inFlight = 0;
-  for (const l of recentLifecycles(s)) {
+  for (const l of yourBundles(s)) {
     if (l.failure) failed++;
     else if (l.stages.finalized) landed++;
-    else if (l.source === "submitted") inFlight++;
+    else inFlight++;
   }
   return { landed, failed, inFlight };
 }

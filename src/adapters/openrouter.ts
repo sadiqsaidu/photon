@@ -1,11 +1,25 @@
 import type { LlmClient } from "../shared/ports.js";
 
 const URL = "https://openrouter.ai/api/v1/chat/completions";
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export class OpenRouter implements LlmClient {
   constructor(private readonly apiKey: string) {}
 
   async complete(model: string, system: string, user: string): Promise<string> {
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await this.once(model, system, user);
+      } catch (e) {
+        lastErr = e;
+        await sleep(800);
+      }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+  }
+
+  private async once(model: string, system: string, user: string): Promise<string> {
     const res = await fetch(URL, {
       method: "POST",
       headers: {

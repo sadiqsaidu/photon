@@ -13,16 +13,21 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`${path}: ${res.status}`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`${path}: ${res.status} ${text}`);
+  }
   return (await res.json()) as T;
 }
 
-export function prepareBundle(payer: string, tip?: number): Promise<UnsignedBundle> {
-  return post<UnsignedBundle>("/bundle/prepare", { payer, tip });
+export type Payload = { kind: "sol_transfer"; to: string; lamports: number } | { kind: "memo" };
+
+export function prepareBundle(payer: string, tip: number, payload: Payload): Promise<UnsignedBundle> {
+  return post<UnsignedBundle>("/bundle/prepare", { payer, tip, payload });
 }
 
-export function submitBundle(signedTx: string, signature: string, tip: number): Promise<{ bundleId: string | null }> {
-  return post("/bundle/submit", { signedTx, signature, tip });
+export function submitBundle(signedTxs: string[], signature: string, tip: number): Promise<{ bundleId: string | null }> {
+  return post("/bundle/submit", { signedTxs, signature, tip });
 }
 
 export function injectFault(): Promise<{ signature: string }> {

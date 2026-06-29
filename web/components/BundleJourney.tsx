@@ -1,6 +1,6 @@
 "use client";
 
-import { recentLifecycles, useStore, type Lifecycle } from "@/lib/store";
+import { useStore, yourBundles, type Lifecycle } from "@/lib/store";
 import { STAGES, type Stage } from "@/lib/events";
 import { shortSig } from "@/lib/format";
 
@@ -11,16 +11,15 @@ function delta(l: Lifecycle, from: Stage, to: Stage): string {
   return `+${b - a}ms`;
 }
 
-export function LifecycleStrip() {
+export function BundleJourney() {
   const { state } = useStore();
-  const recent = recentLifecycles(state);
-  const active = recent[0];
+  const active = yourBundles(state)[0];
 
   return (
     <div className="card">
       <div className="mb-4 flex items-center justify-between">
-        <span className="label">transaction journey</span>
-        <span className="text-[11px] text-zinc-500">{active ? shortSig(active.signature) : "awaiting activity"}</span>
+        <span className="label">your bundle · journey</span>
+        <span className="num text-[11px] text-zinc-500">{active ? shortSig(active.signature) : "submit a bundle to track it"}</span>
       </div>
 
       <div className="flex items-center">
@@ -44,9 +43,7 @@ export function LifecycleStrip() {
                       active?.stages[STAGES[i + 1]] ? "bg-accent/60" : "bg-white/[0.06]"
                     }`}
                   />
-                  <span className="mt-1 h-3 text-[10px] tabular-nums text-zinc-500">
-                    {active ? delta(active, stage, STAGES[i + 1]) : ""}
-                  </span>
+                  <span className="num mt-1 h-3 text-[10px] text-zinc-500">{active ? delta(active, stage, STAGES[i + 1]) : ""}</span>
                 </div>
               )}
             </div>

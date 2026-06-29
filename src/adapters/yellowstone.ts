@@ -74,12 +74,15 @@ export class Yellowstone implements StreamSource {
   private readonly queue = new EventQueue();
   private closed = false;
   private reconnects = 0;
+  private connected = false;
 
   constructor(url: string, token: string | undefined, private readonly account: string) {
     this.client = new Client(url, token, {
       "grpc.max_receive_message_length": 64 * 1024 * 1024,
     });
     void this.run();
+    // Re-emit health so a dashboard that connects later still sees the live state.
+    setInterval(() => this.health(this.connected), 10_000);
   }
 
   events(): AsyncIterable<StreamEvent> {
@@ -114,6 +117,7 @@ export class Yellowstone implements StreamSource {
   }
 
   private health(connected: boolean): void {
+    this.connected = connected;
     bus.publish({ type: "stream", connected, dropped: this.queue.dropped, reconnects: this.reconnects });
   }
 

@@ -72,14 +72,14 @@ export class Submitter {
   }
 
   async submitSigned(input: {
-    signedTx: string;
+    signedTxs: string[];
     signature: string;
     tip: Lamports;
     payloadKind?: string;
   }): Promise<string | null> {
     let bundleId: string | null = null;
     try {
-      bundleId = await this.jito.sendBundle([input.signedTx]);
+      bundleId = await this.jito.sendBundle(input.signedTxs);
     } catch (e) {
       warn("jito", "sendBundle rejected", String(e));
     }

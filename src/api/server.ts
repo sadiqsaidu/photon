@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { PublicKey } from "@solana/web3.js";
 import { bus } from "../shared/bus.js";
-import { BundleBuilder, SelfTransferMemo } from "../core/builder.js";
+import { BundleBuilder, SelfTransferMemo, payloadFrom } from "../core/builder.js";
 import type { Submitter } from "../core/submission.js";
 import { info } from "../shared/log.js";
 
@@ -78,18 +78,23 @@ export function createApi(deps: ApiDeps): Server {
           return;
         }
         const tip = typeof body.tip === "number" ? body.tip : deps.defaultTip();
-        const unsigned = await deps.builder.buildUnsigned(new SelfTransferMemo(), new PublicKey(body.payer), tip);
+        const unsigned = await deps.builder.buildUnsigned(payloadFrom(body.payload), new PublicKey(body.payer), tip);
         send(res, 200, unsigned);
         return;
       }
       if (req.method === "POST" && url.pathname === "/bundle/submit") {
         const body = await readJson(req);
-        if (typeof body.signedTx !== "string" || typeof body.signature !== "string") {
-          send(res, 400, { error: "signedTx (base64) and signature required" });
+        const signedTxs = Array.isArray(body.signedTxs)
+          ? (body.signedTxs as string[])
+          : typeof body.signedTx === "string"
+            ? [body.signedTx]
+            : [];
+        if (signedTxs.length === 0 || typeof body.signature !== "string") {
+          send(res, 400, { error: "signedTx(s) (base64) and signature required" });
           return;
         }
         const bundleId = await deps.submitter.submitSigned({
-          signedTx: body.signedTx,
+          signedTxs,
           signature: body.signature,
           tip: typeof body.tip === "number" ? body.tip : 0,
           payloadKind: typeof body.payload === "string" ? body.payload : undefined,
