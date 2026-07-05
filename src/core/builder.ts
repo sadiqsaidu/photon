@@ -9,7 +9,8 @@ import {
 } from "@solana/web3.js";
 import bs58 from "bs58";
 import type { RpcGateway, Signer } from "../shared/ports.js";
-import type { Lamports } from "../shared/types.js";
+import type { BlockhashSource, Lamports } from "../shared/types.js";
+import type { BlockhashCache } from "./blockhash.js";
 
 const MEMO = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
 
@@ -62,12 +63,31 @@ export interface UnsignedBundle {
   tipAccount: string;
   tip: Lamports;
   blockhash: string;
+  lastValidBlockHeight: number | null;
+  blockhashSource: BlockhashSource;
+}
+
+// Explicit blockhash to sign against instead of cache/RPC: the fault demo
+// injects a fabricated expired hash, and recovery can reuse a still-valid one.
+export interface BlockhashOverride {
+  blockhash: string;
+  lastValidBlockHeight: number | null;
+  source: BlockhashSource;
+}
+
+export interface BuiltBundle {
+  base64: string;
+  signature: string;
+  blockhash: string;
+  lastValidBlockHeight: number | null;
+  blockhashSource: BlockhashSource;
 }
 
 export class BundleBuilder {
   constructor(
     private readonly rpc: RpcGateway,
     private readonly tipAccounts: string[],
+    private readonly cache?: BlockhashCache,
   ) {}
 
   private tipAccount(): PublicKey {
@@ -75,33 +95,45 @@ export class BundleBuilder {
     return new PublicKey(pick as string);
   }
 
+  // Zero-RPC hot path: prefer the streamed cache (< 2 s old); RPC remains the
+  // cold-start fallback.
+  private async pickBlockhash(override?: BlockhashOverride): Promise<BlockhashOverride> {
+    if (override) return override;
+    const cached = this.cache?.fresh();
+    if (cached) return { ...cached, source: "stream" };
+    const r = await this.rpc.latestBlockhash("confirmed");
+    return { blockhash: r.blockhash, lastValidBlockHeight: r.lastValidBlockHeight, source: "rpc" };
+  }
+
   private async assemble(
     payload: TxPayload,
     payer: PublicKey,
     tip: Lamports,
-    staleBlockhash?: string,
-  ): Promise<{ message: MessageV0; tipAccount: string; blockhash: string }> {
-    const blockhash = staleBlockhash ?? (await this.rpc.latestBlockhash("confirmed")).blockhash;
+    override?: BlockhashOverride,
+  ): Promise<{ message: MessageV0; tipAccount: string } & BlockhashOverride> {
+    const picked = await this.pickBlockhash(override);
     const tipAccount = this.tipAccount();
     const message = new TransactionMessage({
       payerKey: payer,
-      recentBlockhash: blockhash,
+      recentBlockhash: picked.blockhash,
       instructions: [
         ComputeBudgetProgram.setComputeUnitLimit({ units: payload.computeUnits }),
         ...payload.build(payer),
         SystemProgram.transfer({ fromPubkey: payer, toPubkey: tipAccount, lamports: tip }),
       ],
     }).compileToV0Message();
-    return { message, tipAccount: tipAccount.toBase58(), blockhash };
+    return { message, tipAccount: tipAccount.toBase58(), ...picked };
   }
 
   async buildUnsigned(payload: TxPayload, payer: PublicKey, tip: Lamports): Promise<UnsignedBundle> {
-    const { message, tipAccount, blockhash } = await this.assemble(payload, payer, tip);
+    const a = await this.assemble(payload, payer, tip);
     return {
-      messageBase64: Buffer.from(message.serialize()).toString("base64"),
-      tipAccount,
+      messageBase64: Buffer.from(a.message.serialize()).toString("base64"),
+      tipAccount: a.tipAccount,
       tip,
-      blockhash,
+      blockhash: a.blockhash,
+      lastValidBlockHeight: a.lastValidBlockHeight,
+      blockhashSource: a.source,
     };
   }
 
@@ -109,13 +141,19 @@ export class BundleBuilder {
     payload: TxPayload,
     signer: Signer,
     tip: Lamports,
-    staleBlockhash?: string,
-  ): Promise<{ base64: string; signature: string }> {
+    override?: BlockhashOverride,
+  ): Promise<BuiltBundle> {
     const payer = new PublicKey(signer.publicKey);
-    const { message } = await this.assemble(payload, payer, tip, staleBlockhash);
-    const tx = new VersionedTransaction(message);
-    const sig = await signer.sign(message.serialize());
+    const a = await this.assemble(payload, payer, tip, override);
+    const tx = new VersionedTransaction(a.message);
+    const sig = await signer.sign(a.message.serialize());
     tx.addSignature(payer, sig);
-    return { base64: Buffer.from(tx.serialize()).toString("base64"), signature: bs58.encode(sig) };
+    return {
+      base64: Buffer.from(tx.serialize()).toString("base64"),
+      signature: bs58.encode(sig),
+      blockhash: a.blockhash,
+      lastValidBlockHeight: a.lastValidBlockHeight,
+      blockhashSource: a.source,
+    };
   }
 }

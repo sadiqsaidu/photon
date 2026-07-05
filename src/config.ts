@@ -1,10 +1,13 @@
 import "dotenv/config";
+import { DEFAULT_JITO_ENGINES } from "./adapters/jito-multi.js";
 
 export interface Config {
   rpcUrl: string;
   grpcUrl: string;
   grpcToken: string | undefined;
-  jitoEngine: string;
+  grpcUrl2: string | undefined;
+  grpcToken2: string | undefined;
+  jitoEngines: string[];
   geminiKey: string | undefined;
   geminiModel: string;
   openrouterKey: string | undefined;
@@ -28,7 +31,12 @@ export function loadConfig(): Config {
     rpcUrl: req("RPC_URL"),
     grpcUrl: req("GRPC_URL"),
     grpcToken: process.env.GRPC_TOKEN,
-    jitoEngine: process.env.JITO_ENGINE ?? "https://frankfurt.mainnet.block-engine.jito.wtf",
+    grpcUrl2: process.env.GRPC_URL_2,
+    grpcToken2: process.env.GRPC_TOKEN_2,
+    jitoEngines: (process.env.JITO_ENGINES ?? process.env.JITO_ENGINE ?? DEFAULT_JITO_ENGINES.join(","))
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
     geminiKey: process.env.GEMINI_API_KEY,
     geminiModel: process.env.GEMINI_MODEL ?? "gemini-2.0-flash",
     openrouterKey: process.env.OPENROUTER_API_KEY,

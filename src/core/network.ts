@@ -13,17 +13,27 @@ interface KobeValidator {
 
 export class NetworkMonitor {
   private jito = new Set<string>();
+  private readonly timers: NodeJS.Timeout[] = [];
 
   constructor(
     private readonly rpc: SolanaRpc,
     private readonly oracle: TipOracle,
   ) {}
 
+  isJito(identity: string): boolean {
+    return this.jito.has(identity);
+  }
+
   start(): void {
     void this.refreshJito();
-    setInterval(() => void this.refreshJito(), JITO_REFRESH_MS);
+    this.timers.push(setInterval(() => void this.refreshJito(), JITO_REFRESH_MS));
     void this.tick();
-    setInterval(() => void this.tick(), 3000);
+    this.timers.push(setInterval(() => void this.tick(), 3000));
+  }
+
+  close(): void {
+    for (const t of this.timers) clearInterval(t);
+    this.timers.length = 0;
   }
 
   private async tick(): Promise<void> {

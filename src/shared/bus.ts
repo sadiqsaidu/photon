@@ -12,9 +12,33 @@ export type PhotonEvent =
       failure: FailureClass | null;
       retryOf: string | null;
     }
-  | { type: "tip_policy"; anchor: string; multiplier: number; tip: number; reasoning: string; confidence: number }
+  | {
+      type: "tip_policy";
+      anchor: string;
+      multiplier: number;
+      tip: number;
+      reasoning: string;
+      confidence: number;
+      floorSource: "local" | "rest";
+    }
   | { type: "agent"; kind: "recovery" | "failure_reasoning"; signature: string; action: string; reasoning: string; confidence: number }
   | { type: "stream"; connected: boolean; dropped: number; reconnects: number }
+  | { type: "leader"; slotsToLeader: number; windowOpen: boolean; leaderIdentity: string | null }
+  | {
+      type: "stream_race";
+      providers: {
+        name: string;
+        wins: number;
+        losses: number;
+        p50DeltaMs: number;
+        p99DeltaMs: number;
+        reconnects: number;
+        connected: boolean;
+        lastEventAgoMs: number;
+      }[];
+      dropped: number;
+      droppedDelta: number;
+    }
   | {
       type: "network";
       slot: number;

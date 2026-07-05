@@ -31,9 +31,10 @@ function jitoMock(sent: string[][]): BundleGateway {
 
 const storeMock = { async saveLifecycle() {}, async saveDecision() {} } as unknown as Store;
 
-function ctxMock(tracked: Lifecycle[]): SubmitContext {
+function ctxMock(tracked: Lifecycle[], settled: Lifecycle[] = []): SubmitContext {
   return {
     track(l) { tracked.push(l); },
+    settleNow(l) { settled.push(l); },
     tip() { return { tip: 5000, trace: null }; },
     slotsToLeader() { return 2; },
   };
@@ -100,6 +101,63 @@ test("submitSigned sends and tracks an externally-signed bundle without auto-ret
   l.failure = "bundle_dropped";
   await sub.onFailure(l);
   assert.equal(sent.length, 1);
+});
+
+test("send rejection by all engines settles send_rejected immediately, no tracking", async () => {
+  const tracked: Lifecycle[] = [];
+  const settled: Lifecycle[] = [];
+  const builder = new BundleBuilder(rpc, [TIP_ACCOUNT]);
+  const jito: BundleGateway = {
+    async tipAccounts() { return [TIP_ACCOUNT]; },
+    async nextLeader() { return { currentSlot: 1, nextLeaderSlot: 2 }; },
+    async sendBundle() { throw new AggregateError([new Error("engine A: 429"), new Error("engine B: down")], "all rejected"); },
+    async bundleStatus() { return { landed: false, slot: null, err: null }; },
+  };
+  const agent: DecisionPort = { tipPolicy: noTipPolicy, async recover() { throw new Error("not used"); } };
+  const sub = new Submitter(builder, jito, ephemeralSigner(), agent, new TipOracle(), storeMock, ctxMock(tracked, settled));
+
+  const sig = await sub.submit(new SelfTransferMemo());
+  assert.equal(tracked.length, 0); // never became a 60s zombie
+  assert.equal(settled.length, 1);
+  assert.equal(settled[0]!.signature, sig);
+  assert.equal(settled[0]!.failure, "send_rejected");
+  assert.equal(settled[0]!.bundleId, null);
+  assert.ok(settled[0]!.stages.submitted);
+});
+
+test("send_rejected routes through recovery and retries via the agent", async () => {
+  const tracked: Lifecycle[] = [];
+  const settled: Lifecycle[] = [];
+  const sent: string[][] = [];
+  let fail = true;
+  const jito: BundleGateway = {
+    async tipAccounts() { return [TIP_ACCOUNT]; },
+    async nextLeader() { return { currentSlot: 1, nextLeaderSlot: 2 }; },
+    async sendBundle(txs) {
+      if (fail) throw new AggregateError([new Error("engine A: down")], "all rejected");
+      sent.push(txs);
+      return "bundle-ok";
+    },
+    async bundleStatus() { return { landed: false, slot: null, err: null }; },
+  };
+  const agent: DecisionPort = {
+    tipPolicy: noTipPolicy,
+    async recover(ctx) {
+      assert.equal(ctx.failure, "send_rejected");
+      return { action: "resubmit", refreshBlockhash: true, tip: 6000, trace: { reasoning: "retry send", confidence: 0.6 } };
+    },
+  };
+  const builder = new BundleBuilder(rpc, [TIP_ACCOUNT]);
+  const sub = new Submitter(builder, jito, ephemeralSigner(), agent, new TipOracle(), storeMock, ctxMock(tracked, settled));
+
+  const sig = await sub.submit(new SelfTransferMemo());
+  assert.equal(settled[0]!.failure, "send_rejected");
+  fail = false;
+  await sub.onFailure(settled[0]!); // what Worker.onSettled does in production
+  assert.equal(sent.length, 1);
+  assert.equal(tracked.length, 1);
+  assert.equal(tracked[0]!.retryOf, sig);
+  assert.equal(tracked[0]!.tip, 6000);
 });
 
 test("onFailure stops after the attempt cap", async () => {

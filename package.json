@@ -12,6 +12,7 @@
     "construct": "tsx src/index.ts construct",
     "submit": "tsx src/index.ts submit",
     "fault": "tsx src/index.ts fault",
+    "fault2": "tsx src/index.ts fault2",
     "test": "node --import tsx --test 'test/**/*.test.ts'",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"

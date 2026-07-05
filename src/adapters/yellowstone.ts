@@ -1,9 +1,9 @@
 import { createRequire } from "node:module";
 import bs58 from "bs58";
-import type { StreamSource } from "../shared/ports.js";
-import type { Commitment, StreamEvent } from "../shared/types.js";
+import type { RawStreamProvider, StreamSource } from "../shared/ports.js";
+import { toSlot, type Commitment, type StreamEvent, type TaggedStreamEvent } from "../shared/types.js";
 import { warn } from "../shared/log.js";
-import { bus } from "../shared/bus.js";
+import { JITO_TIP_ACCOUNTS } from "../core/constants.js";
 
 type Pkg = typeof import("@triton-one/yellowstone-grpc");
 type SubscribeRequest = import("@triton-one/yellowstone-grpc").SubscribeRequest;
@@ -23,14 +23,23 @@ function toCommitment(status: number): Commitment | null {
   return null;
 }
 
-class EventQueue {
-  private items: StreamEvent[] = [];
+// Bounded FIFO shared by every stream stage. Under backpressure it sheds
+// items matching `shedFirst` (slot ticks are replaceable; txs are not).
+export class EventQueue<T> {
+  private items: T[] = [];
   private wake: (() => void) | null = null;
+  private closed = false;
   dropped = 0;
 
-  push(e: StreamEvent): void {
-    if (this.items.length >= QUEUE_CAP) {
-      const i = this.items.findIndex((x) => x.kind === "slot");
+  constructor(
+    private readonly cap: number,
+    private readonly shedFirst: (item: T) => boolean,
+  ) {}
+
+  push(e: T): void {
+    if (this.closed) return;
+    if (this.items.length >= this.cap) {
+      const i = this.items.findIndex(this.shedFirst);
       this.items.splice(i >= 0 ? i : 0, 1);
       this.dropped++;
     }
@@ -39,15 +48,22 @@ class EventQueue {
     this.wake = null;
   }
 
-  async *drain(): AsyncIterable<StreamEvent> {
+  close(): void {
+    this.closed = true;
+    this.wake?.();
+    this.wake = null;
+  }
+
+  async *drain(): AsyncIterable<T> {
     for (;;) {
-      while (this.items.length) yield this.items.shift() as StreamEvent;
+      while (this.items.length) yield this.items.shift() as T;
+      if (this.closed) return;
       await new Promise<void>((r) => (this.wake = r));
     }
   }
 }
 
-function request(account: string): SubscribeRequest {
+function request(accounts: string[]): SubscribeRequest {
   return {
     accounts: {},
     slots: { client: { filterByCommitment: false } },
@@ -55,70 +71,140 @@ function request(account: string): SubscribeRequest {
       client: {
         vote: false,
         failed: true,
-        accountInclude: [account],
+        accountInclude: accounts,
         accountExclude: [],
         accountRequired: [],
       },
     },
     transactionsStatus: {},
     blocks: {},
-    blocksMeta: {},
+    blocksMeta: { client: {} },
     entry: {},
     accountsDataSlice: [],
     commitment: CommitmentLevel.PROCESSED,
   };
 }
 
-export class Yellowstone implements StreamSource {
+// One Yellowstone gRPC connection with its own reconnect loop. Usable directly
+// as a StreamSource, or as one leg of a MultiStream via the tagged raw() feed.
+export class Yellowstone implements StreamSource, RawStreamProvider {
   private readonly client: Client;
-  private readonly queue = new EventQueue();
+  private readonly queue = new EventQueue<TaggedStreamEvent>(QUEUE_CAP, (t) => t.event.kind === "slot");
+  private readonly tipSet: Set<string>;
   private closed = false;
-  private reconnects = 0;
-  private connected = false;
+  private active: { cancel(): void } | null = null;
+  reconnects = 0;
+  connected = false;
 
-  constructor(url: string, token: string | undefined, private readonly account: string) {
+  constructor(
+    readonly name: string,
+    url: string,
+    token: string | undefined,
+    private readonly accounts: string[],
+    tipAccounts: readonly string[] = JITO_TIP_ACCOUNTS,
+  ) {
+    this.tipSet = new Set(tipAccounts);
     this.client = new Client(url, token, {
       "grpc.max_receive_message_length": 64 * 1024 * 1024,
     });
     void this.run();
-    // Re-emit health so a dashboard that connects later still sees the live state.
-    setInterval(() => this.health(this.connected), 10_000);
   }
 
-  events(): AsyncIterable<StreamEvent> {
+  raw(): AsyncIterable<TaggedStreamEvent> {
     return this.queue.drain();
+  }
+
+  async *events(): AsyncIterable<StreamEvent> {
+    for await (const t of this.queue.drain()) yield t.event;
+  }
+
+  // Half-open gRPC streams stay "connected" and deliver nothing; the watchdog
+  // calls this to force the reconnect loop around.
+  forceReconnect(): void {
+    try {
+      this.active?.cancel();
+    } catch {
+      // already torn down
+    }
   }
 
   async close(): Promise<void> {
     this.closed = true;
+    this.forceReconnect();
+    this.queue.close();
   }
 
   private map(u: SubscribeUpdate): void {
+    const recvAt = Date.now();
     if (u.slot) {
       const commitment = toCommitment(u.slot.status);
       if (commitment) {
-        this.queue.push({
-          kind: "slot",
-          slot: Number(u.slot.slot),
-          parent: u.slot.parent !== undefined ? Number(u.slot.parent) : null,
-          commitment,
-        });
+        this.push(
+          {
+            kind: "slot",
+            slot: toSlot(u.slot.slot),
+            parent: u.slot.parent !== undefined ? toSlot(u.slot.parent) : null,
+            commitment,
+          },
+          recvAt,
+        );
       }
     }
     const sig = u.transaction?.transaction?.signature;
     if (sig && u.transaction) {
-      this.queue.push({
-        kind: "tx",
-        signature: bs58.encode(sig),
-        slot: Number(u.transaction.slot),
-        err: u.transaction.transaction?.meta?.err ?? null,
-      });
+      const signature = bs58.encode(sig);
+      const slot = toSlot(u.transaction.slot);
+      this.push(
+        {
+          kind: "tx",
+          signature,
+          slot,
+          err: u.transaction.transaction?.meta?.err ?? null,
+        },
+        recvAt,
+      );
+      this.mapTip(u.transaction.transaction, signature, slot, recvAt);
+    }
+    const height = u.blockMeta?.blockHeight?.blockHeight;
+    if (u.blockMeta && height !== undefined) {
+      this.push(
+        {
+          kind: "block",
+          slot: toSlot(u.blockMeta.slot),
+          blockhash: u.blockMeta.blockhash,
+          blockHeight: toSlot(height),
+          parentBlockhash: u.blockMeta.parentBlockhash,
+        },
+        recvAt,
+      );
     }
   }
 
-  private health(connected: boolean): void {
-    this.connected = connected;
-    bus.publish({ type: "stream", connected, dropped: this.queue.dropped, reconnects: this.reconnects });
+  // If the tx moved lamports into a tip account, emit the amount as a tip
+  // observation (post - pre balance at the tip account's key index). Skips
+  // silently when the provider payload lacks meta or account keys.
+  private mapTip(
+    tx: import("@triton-one/yellowstone-grpc").SubscribeUpdateTransactionInfo | undefined,
+    signature: string,
+    slot: number,
+    recvAt: number,
+  ): void {
+    const meta = tx?.meta;
+    const keys = tx?.transaction?.message?.accountKeys;
+    if (!meta || !keys || meta.preBalances.length === 0 || meta.postBalances.length === 0) return;
+    const n = Math.min(keys.length, meta.preBalances.length, meta.postBalances.length);
+    for (let i = 0; i < n; i++) {
+      if (!this.tipSet.has(bs58.encode(keys[i] as Uint8Array))) continue;
+      const lamports = Number(meta.postBalances[i]) - Number(meta.preBalances[i]);
+      if (lamports > 0) {
+        this.push({ kind: "tip", slot, lamports, signature }, recvAt);
+        return;
+      }
+    }
+  }
+
+  private push(event: StreamEvent, recvAt: number): void {
+    this.queue.push({ event, provider: this.name, recvAt });
   }
 
   private async run(): Promise<void> {
@@ -126,24 +212,29 @@ export class Yellowstone implements StreamSource {
     while (!this.closed) {
       try {
         const stream = await this.client.subscribe();
+        this.active = stream;
         await new Promise<void>((resolve, reject) => {
           stream.on("data", (u: SubscribeUpdate) => this.map(u));
           stream.on("error", reject);
           stream.on("end", resolve);
-          stream.write(request(this.account), (err: unknown) => {
+          stream.write(request(this.accounts), (err: unknown) => {
             if (err) reject(err);
-            else this.health(true);
+            else this.connected = true;
           });
         });
         backoff = 500;
       } catch (e) {
         if (this.closed) return;
         this.reconnects++;
-        this.health(false);
-        warn("stream", "disconnected, reconnecting", { backoff, error: String(e) });
-        if (this.queue.dropped > 0) warn("stream", "shed events under backpressure", { dropped: this.queue.dropped });
+        this.connected = false;
+        warn("stream", "disconnected, reconnecting", { provider: this.name, backoff, error: String(e) });
+        if (this.queue.dropped > 0) {
+          warn("stream", "shed events under backpressure", { provider: this.name, dropped: this.queue.dropped });
+        }
         await new Promise((r) => setTimeout(r, backoff + Math.random() * 250));
         backoff = Math.min(backoff * 2, 15_000);
+      } finally {
+        this.active = null;
       }
     }
   }

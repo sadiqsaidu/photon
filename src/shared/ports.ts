@@ -5,11 +5,25 @@ import type {
   Lamports,
   Slot,
   StreamEvent,
+  TaggedStreamEvent,
   TipFloor,
 } from "./types.js";
 
 export interface StreamSource {
   events(): AsyncIterable<StreamEvent>;
+  close(): Promise<void>;
+  // Provider win/loss counts, when the source races providers (MultiStream).
+  raceSnapshot?(): Record<string, { wins: number; losses: number }>;
+}
+
+// One leg of a racing stream: a tagged raw feed plus the hooks MultiStream
+// needs to police it (staleness watchdog, telemetry).
+export interface RawStreamProvider {
+  readonly name: string;
+  readonly connected: boolean;
+  readonly reconnects: number;
+  raw(): AsyncIterable<TaggedStreamEvent>;
+  forceReconnect(): void;
   close(): Promise<void>;
 }
 
@@ -43,11 +57,20 @@ export interface Signer {
   sign(message: Uint8Array): Promise<Uint8Array>;
 }
 
+export interface TipForecastView {
+  p50AtLanding: Lamports;
+  trendPctPer10Slots: number;
+  volatility: number;
+}
+
 export interface TipContext {
   floor: TipFloor;
   landRate: number;
   inFlight: number;
   slotsToLeader: number;
+  forecast: TipForecastView;
+  windowOpen: boolean;
+  floorSource: "local" | "rest";
 }
 
 export interface TipPolicy {
@@ -63,6 +86,9 @@ export interface RecoveryContext {
   floor: TipFloor;
   slotsToLeader: number;
   attempt: number;
+  blockhashStillValid: boolean;
+  landedPerBundleStatus: boolean;
+  targetLeaderSkipped: boolean;
 }
 
 export interface RecoveryDecision {
