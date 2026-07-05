@@ -12,7 +12,6 @@ const KEEP_BEHIND = 100;
 
 // The RPC surface the local schedule needs (SolanaRpc satisfies it).
 export interface LeaderRpc {
-  slot(): Promise<number>;
   slotLeaders(start: number, limit: number): Promise<string[]>;
   epochInfo(): Promise<{ epoch: number; slotIndex: number; slotsInEpoch: number; absoluteSlot: number }>;
 }
