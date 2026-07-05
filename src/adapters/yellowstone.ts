@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import bs58 from "bs58";
 import type { RawStreamProvider, StreamSource } from "../shared/ports.js";
-import type { Commitment, StreamEvent, TaggedStreamEvent } from "../shared/types.js";
+import { toSlot, type Commitment, type StreamEvent, type TaggedStreamEvent } from "../shared/types.js";
 import { warn } from "../shared/log.js";
 import { JITO_TIP_ACCOUNTS } from "../core/constants.js";
 
@@ -142,8 +142,8 @@ export class Yellowstone implements StreamSource, RawStreamProvider {
         this.push(
           {
             kind: "slot",
-            slot: Number(u.slot.slot),
-            parent: u.slot.parent !== undefined ? Number(u.slot.parent) : null,
+            slot: toSlot(u.slot.slot),
+            parent: u.slot.parent !== undefined ? toSlot(u.slot.parent) : null,
             commitment,
           },
           recvAt,
@@ -153,7 +153,7 @@ export class Yellowstone implements StreamSource, RawStreamProvider {
     const sig = u.transaction?.transaction?.signature;
     if (sig && u.transaction) {
       const signature = bs58.encode(sig);
-      const slot = Number(u.transaction.slot);
+      const slot = toSlot(u.transaction.slot);
       this.push(
         {
           kind: "tx",
@@ -170,9 +170,9 @@ export class Yellowstone implements StreamSource, RawStreamProvider {
       this.push(
         {
           kind: "block",
-          slot: Number(u.blockMeta.slot),
+          slot: toSlot(u.blockMeta.slot),
           blockhash: u.blockMeta.blockhash,
-          blockHeight: Number(height),
+          blockHeight: toSlot(height),
           parentBlockhash: u.blockMeta.parentBlockhash,
         },
         recvAt,

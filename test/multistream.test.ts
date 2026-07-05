@@ -108,6 +108,23 @@ test("killing provider A mid-stream leaves provider B flowing with zero gap", as
   await m.close();
 });
 
+test("backpressure sheds slot events before tx events and counts drops", async () => {
+  const a = new FakeProvider("A");
+  const m = new MultiStream([a]);
+
+  const CAP = 8192;
+  const SLOTS = 100;
+  for (let i = 0; i < SLOTS; i++) a.emit(slot(i + 1));
+  for (let i = 0; i < CAP; i++) a.emit(tx(`sig${i}`));
+  await tick();
+
+  assert.equal(m.dropped, SLOTS); // every slot event was shed first
+  const events = await collect(m, CAP + SLOTS, 2000);
+  assert.equal(events.length, CAP);
+  assert.ok(events.every((e) => e.kind === "tx"), "only tx events should survive");
+  await m.close();
+});
+
 test("LRU does not re-admit an old duplicate within the window", async () => {
   const a = new FakeProvider("A");
   const b = new FakeProvider("B");

@@ -3,9 +3,11 @@ import type { FailureClass } from "../shared/types.js";
 export interface FailureHint {
   timedOut?: boolean;
   leaderSkipped?: boolean;
+  sendRejected?: boolean;
 }
 
 export function classify(err: unknown, hint: FailureHint): FailureClass {
+  if (hint.sendRejected) return "send_rejected";
   if (hint.leaderSkipped) return "leader_skipped";
   const s = JSON.stringify(err ?? "");
   if (s.includes("BlockhashNotFound") || s.includes("BlockhashExpired")) return "expired_blockhash";

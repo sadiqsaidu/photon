@@ -94,28 +94,66 @@ function stack(cfg: Config) {
   return { rpc, jito, store, oracle, agent, worker, monitor, leader, blockhash, stream };
 }
 
-async function observe(cfg: Config): Promise<void> {
-  const { worker, monitor } = stack(cfg);
-  info("main", "watching account", { account: cfg.watchAccount });
-  worker.start();
-  monitor.start();
+type Stack = ReturnType<typeof stack>;
+
+// SIGINT closes the gRPC streams, stops every interval, and ends the SSE
+// server. JSONL rows are written with appendFileSync, so nothing needs
+// flushing beyond letting in-flight settles finish their synchronous write.
+function onShutdown(s: Stack, api?: import("node:http").Server): void {
+  let closing = false;
+  const close = () => {
+    if (closing) return;
+    closing = true;
+    info("main", "shutting down");
+    s.worker.close();
+    s.monitor.close();
+    api?.closeAllConnections?.();
+    api?.close();
+    void s.stream.close().finally(() => process.exit(0));
+    // Belt and braces: never hang the terminal on a stuck close.
+    setTimeout(() => process.exit(0), 3000).unref();
+  };
+  process.once("SIGINT", close);
+  process.once("SIGTERM", close);
 }
 
-async function submitMode(cfg: Config, fault: boolean): Promise<void> {
-  if (!cfg.walletSecret) throw new Error("set WALLET_SECRET (throwaway) to run submit/fault");
+async function observe(cfg: Config): Promise<void> {
+  const s = stack(cfg);
+  info("main", "watching account", { account: cfg.watchAccount });
+  s.worker.start();
+  s.monitor.start();
+  onShutdown(s);
+}
+
+type SubmitVariant = "normal" | "fault" | "fault2";
+
+async function submitMode(cfg: Config, variant: SubmitVariant): Promise<void> {
+  if (!cfg.walletSecret) throw new Error("set WALLET_SECRET (throwaway) to run submit/fault/fault2");
   const s = stack(cfg);
   const signer = signerFromSecret(cfg.walletSecret);
   const builder = new BundleBuilder(s.rpc, await s.jito.tipAccounts(), s.blockhash);
   const submitter = new Submitter(builder, s.jito, signer, s.agent, s.oracle, s.store, s.worker, s.blockhash, s.leader);
   s.worker.onSubmittedFailure = (l) => submitter.onFailure(l);
   s.worker.start();
+  onShutdown(s);
 
-  const runs = fault ? 1 : 10;
-  info("main", "submitting", { wallet: signer.publicKey, runs, fault });
+  const runs = variant === "normal" ? 10 : 1;
+  info("main", "submitting", { wallet: signer.publicKey, runs, variant });
   for (let i = 0; i < runs; i++) {
-    await submitter.submit(new SelfTransferMemo(), fault ? { fault: true, ttlMs: 15_000 } : {});
+    // fault: fabricated expired blockhash -> expired_blockhash + recovery.
+    // fault2: Jito-minimum tip (1000) -> realistic non-landing -> the
+    // bundleStatus/leader-window path classifies bundle_dropped and the agent
+    // reasons about raising the tip.
+    const opts =
+      variant === "fault"
+        ? { fault: true, ttlMs: 15_000 }
+        : variant === "fault2"
+          ? { tip: 1000, ttlMs: 20_000 }
+          : {};
+    await submitter.submit(new SelfTransferMemo(), opts);
     await sleep(8000);
   }
+  info("main", "runs finished; still tracking lifecycles (Ctrl-C to exit)");
 }
 
 async function serve(cfg: Config): Promise<void> {
@@ -129,6 +167,7 @@ async function serve(cfg: Config): Promise<void> {
 
   const api = createApi({ builder, submitter, defaultTip: () => s.worker.tip().tip, hasSigner: Boolean(signer) });
   api.listen(cfg.port, () => info("api", "listening", { port: cfg.port, watch: cfg.watchAccount }));
+  onShutdown(s, api);
 }
 
 async function construct(cfg: Config): Promise<void> {
@@ -147,10 +186,12 @@ const run =
     : mode === "construct"
       ? construct(cfg)
       : mode === "submit"
-        ? submitMode(cfg, false)
+        ? submitMode(cfg, "normal")
         : mode === "fault"
-          ? submitMode(cfg, true)
-          : observe(cfg);
+          ? submitMode(cfg, "fault")
+          : mode === "fault2"
+            ? submitMode(cfg, "fault2")
+            : observe(cfg);
 
 run.catch((e: unknown) => {
   console.error(e);

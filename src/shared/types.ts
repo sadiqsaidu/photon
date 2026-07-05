@@ -1,6 +1,13 @@
 export type Slot = number;
 export type Lamports = number;
 
+// Yellowstone delivers u64s as strings; convert exactly once at the edge.
+export function toSlot(v: string | number | bigint): number {
+  const n = Number(v);
+  if (!Number.isSafeInteger(n)) throw new Error(`u64 out of safe integer range: ${String(v)}`);
+  return n;
+}
+
 export type Commitment = "processed" | "confirmed" | "finalized";
 export type Stage = "submitted" | "processed" | "confirmed" | "finalized";
 
@@ -10,6 +17,7 @@ export type FailureClass =
   | "compute_exceeded"
   | "bundle_dropped"
   | "leader_skipped"
+  | "send_rejected"
   | "unknown";
 
 export type StreamEvent =

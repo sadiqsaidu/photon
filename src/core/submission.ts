@@ -4,6 +4,7 @@ import type { BundleGateway, DecisionPort, Signer } from "../shared/ports.js";
 import type { BlockhashSource, DecisionTrace, Lamports, Lifecycle } from "../shared/types.js";
 import type { Store } from "../db/store.js";
 import { BundleBuilder, type BlockhashOverride, type TxPayload } from "./builder.js";
+import { classify } from "./classifier.js";
 import { TipOracle } from "./tip-oracle.js";
 import { info, warn } from "../shared/log.js";
 import { bus } from "../shared/bus.js";
@@ -15,6 +16,9 @@ const MAX_HOLDS = 2;
 
 export interface SubmitContext {
   track(l: Lifecycle, ttlMs: number): void;
+  // Settle a lifecycle immediately without tracking (send-side rejection is a
+  // failure, not a zombie waiting out a TTL).
+  settleNow(l: Lifecycle): void;
   tip(): { tip: Lamports; trace: DecisionTrace | null };
   slotsToLeader(): number;
 }
@@ -70,13 +74,6 @@ export class Submitter {
     const built = await this.builder.buildAndSign(payload, signer, tip, override);
     const { base64, signature } = built;
 
-    let bundleId: string | null = null;
-    try {
-      bundleId = await this.jito.sendBundle([base64]);
-    } catch (e) {
-      warn("jito", "sendBundle rejected", String(e));
-    }
-
     const attempt = (opts.retryOf ? this.attempts.get(opts.retryOf) ?? 1 : 0) + 1;
     this.attempts.set(signature, attempt);
     this.payloads.set(signature, payload);
@@ -85,6 +82,15 @@ export class Submitter {
       lastValidBlockHeight: built.lastValidBlockHeight,
       source: built.blockhashSource,
     });
+
+    let bundleId: string | null = null;
+    let sendError: unknown = null;
+    try {
+      bundleId = await this.jito.sendBundle([base64]);
+    } catch (e) {
+      sendError = e;
+      warn("jito", "sendBundle rejected by all engines", String(e));
+    }
 
     const l: Lifecycle = {
       signature,
@@ -102,6 +108,16 @@ export class Submitter {
       landedPerBundleStatus: null,
       targetLeaderSkipped: false,
     };
+
+    if (sendError !== null) {
+      // Every engine rejected: settle right now and let the agent decide the
+      // retry — no 60 s zombie lifecycle.
+      l.stages.submitted = { slot: null, at: Date.now() };
+      l.failure = classify(sendError, { sendRejected: true });
+      this.ctx.settleNow(l);
+      return signature;
+    }
+
     this.ctx.track(l, opts.ttlMs ?? 60_000);
     info("submit", "submitted", {
       signature,
@@ -122,10 +138,12 @@ export class Submitter {
     payloadKind?: string;
   }): Promise<string | null> {
     let bundleId: string | null = null;
+    let sendError: unknown = null;
     try {
       bundleId = await this.jito.sendBundle(input.signedTxs);
     } catch (e) {
-      warn("jito", "sendBundle rejected", String(e));
+      sendError = e;
+      warn("jito", "sendBundle rejected by all engines", String(e));
     }
     const l: Lifecycle = {
       signature: input.signature,
@@ -143,6 +161,12 @@ export class Submitter {
       landedPerBundleStatus: null,
       targetLeaderSkipped: false,
     };
+    if (sendError !== null) {
+      l.stages.submitted = { slot: null, at: Date.now() };
+      l.failure = classify(sendError, { sendRejected: true });
+      this.ctx.settleNow(l);
+      return null;
+    }
     this.ctx.track(l, 60_000);
     info("submit", "submitted (external)", { signature: input.signature, bundleId });
     return bundleId;

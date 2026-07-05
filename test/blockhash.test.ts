@@ -77,6 +77,7 @@ function ctxMock(tracked: Lifecycle[]): SubmitContext {
     track(l) {
       tracked.push(l);
     },
+    settleNow() {},
     tip() {
       return { tip: 5000, trace: null };
     },

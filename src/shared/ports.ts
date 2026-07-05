@@ -12,6 +12,8 @@ import type {
 export interface StreamSource {
   events(): AsyncIterable<StreamEvent>;
   close(): Promise<void>;
+  // Provider win/loss counts, when the source races providers (MultiStream).
+  raceSnapshot?(): Record<string, { wins: number; losses: number }>;
 }
 
 // One leg of a racing stream: a tagged raw feed plus the hooks MultiStream

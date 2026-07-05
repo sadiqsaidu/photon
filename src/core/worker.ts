@@ -56,6 +56,11 @@ export class Worker implements SubmitContext {
     this.tracker.track(l, ttlMs, this.leader.window());
   }
 
+  // Send-side rejections settle without ever being tracked.
+  settleNow(l: Lifecycle): void {
+    void this.onSettled(l);
+  }
+
   slotsToLeader(): number {
     return this.leader.status().slotsToLeader;
   }
@@ -111,20 +116,26 @@ export class Worker implements SubmitContext {
       // (slotsToLeader < 0) assume a nominal 8 slots out.
       const ahead = slotsToLeader >= 0 ? slotsToLeader : 8;
       const f = this.forecaster?.forecast(ahead) ?? { p50: floor.p50, trendPctPer10Slots: 0, volatility: 0 };
+      const forecast = {
+        p50AtLanding: f.p50 > 0 ? f.p50 : floor.p50,
+        trendPctPer10Slots: f.trendPctPer10Slots,
+        volatility: f.volatility,
+      };
       this.policy = await this.agent.tipPolicy({
         floor,
         landRate: this.oracle.landRate(),
         inFlight: this.tracker.active(),
         slotsToLeader,
-        forecast: {
-          p50AtLanding: f.p50 > 0 ? f.p50 : floor.p50,
-          trendPctPer10Slots: f.trendPctPer10Slots,
-          volatility: f.volatility,
-        },
+        forecast,
         windowOpen: open,
         floorSource: floor.source,
       });
-      await this.store.saveDecision("tip_policy", { floor, slotsToLeader }, this.policy, this.policy.trace);
+      await this.store.saveDecision(
+        "tip_policy",
+        { floor, slotsToLeader, forecast, windowOpen: open, floorSource: floor.source },
+        this.policy,
+        this.policy.trace,
+      );
       bus.publish({
         type: "tip_policy",
         anchor: this.policy.anchor,
@@ -145,11 +156,16 @@ export class Worker implements SubmitContext {
   }
 
   private async onSettled(l: Lifecycle): Promise<void> {
-    this.oracle.observe(l.failure === null);
-    this.publishLifecycle(l);
-    await this.store.saveLifecycle(l);
-    // The agent only reasons about our own submitted bundles. Observed
-    // third-party failures are classified and recorded, but not sent to the LLM.
-    if (l.failure && l.source === "submitted") await this.onSubmittedFailure?.(l);
+    try {
+      this.oracle.observe(l.failure === null);
+      this.publishLifecycle(l);
+      await this.store.saveLifecycle(l, this.stream.raceSnapshot?.());
+      // The agent only reasons about our own submitted bundles. Observed
+      // third-party failures are classified and recorded, but not sent to the LLM.
+      if (l.failure && l.source === "submitted") await this.onSubmittedFailure?.(l);
+    } catch (e) {
+      // Fired via `void`; never let a store/agent hiccup become an unhandled rejection.
+      warn("worker", "settle handling failed", { signature: l.signature, error: String(e) });
+    }
   }
 }
