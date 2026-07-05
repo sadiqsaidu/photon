@@ -16,6 +16,13 @@ export type StreamEvent =
   | { kind: "slot"; slot: Slot; parent: Slot | null; commitment: Commitment }
   | { kind: "tx"; signature: string; slot: Slot; err: unknown | null };
 
+// A raw per-provider event, tagged so MultiStream can race providers.
+export interface TaggedStreamEvent {
+  event: StreamEvent;
+  provider: string;
+  recvAt: number;
+}
+
 export interface StageMark {
   slot: Slot | null;
   at: number;

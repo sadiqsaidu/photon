@@ -5,11 +5,23 @@ import type {
   Lamports,
   Slot,
   StreamEvent,
+  TaggedStreamEvent,
   TipFloor,
 } from "./types.js";
 
 export interface StreamSource {
   events(): AsyncIterable<StreamEvent>;
+  close(): Promise<void>;
+}
+
+// One leg of a racing stream: a tagged raw feed plus the hooks MultiStream
+// needs to police it (staleness watchdog, telemetry).
+export interface RawStreamProvider {
+  readonly name: string;
+  readonly connected: boolean;
+  readonly reconnects: number;
+  raw(): AsyncIterable<TaggedStreamEvent>;
+  forceReconnect(): void;
   close(): Promise<void>;
 }
 

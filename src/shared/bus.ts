@@ -16,6 +16,21 @@ export type PhotonEvent =
   | { type: "agent"; kind: "recovery" | "failure_reasoning"; signature: string; action: string; reasoning: string; confidence: number }
   | { type: "stream"; connected: boolean; dropped: number; reconnects: number }
   | {
+      type: "stream_race";
+      providers: {
+        name: string;
+        wins: number;
+        losses: number;
+        p50DeltaMs: number;
+        p99DeltaMs: number;
+        reconnects: number;
+        connected: boolean;
+        lastEventAgoMs: number;
+      }[];
+      dropped: number;
+      droppedDelta: number;
+    }
+  | {
       type: "network";
       slot: number;
       leader: string | null;

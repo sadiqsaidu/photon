@@ -1,7 +1,9 @@
 import { PublicKey } from "@solana/web3.js";
 import { loadConfig, type Config } from "./config.js";
 import { Yellowstone } from "./adapters/yellowstone.js";
+import { MultiStream, type ProviderConfig } from "./adapters/multistream.js";
 import { JitoEngine } from "./adapters/jito.js";
+import { JitoMulti } from "./adapters/jito-multi.js";
 import { SolanaRpc } from "./adapters/rpc.js";
 import { Gemini } from "./adapters/gemini.js";
 import { OpenRouter } from "./adapters/openrouter.js";
@@ -38,7 +40,21 @@ function watchSet(cfg: Config): string[] {
   return [...new Set([cfg.watchAccount, ...(walletPubkey ? [walletPubkey] : []), ...JITO_TIP_ACCOUNTS])];
 }
 
-function checkTipAccounts(jito: JitoEngine): void {
+function providerName(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
+
+function grpcProviders(cfg: Config): ProviderConfig[] {
+  const providers: ProviderConfig[] = [{ name: providerName(cfg.grpcUrl), url: cfg.grpcUrl, token: cfg.grpcToken }];
+  if (cfg.grpcUrl2) providers.push({ name: providerName(cfg.grpcUrl2), url: cfg.grpcUrl2, token: cfg.grpcToken2 });
+  return providers;
+}
+
+function checkTipAccounts(jito: JitoMulti): void {
   void jito
     .tipAccounts()
     .then((remote) => {
@@ -55,9 +71,12 @@ function checkTipAccounts(jito: JitoEngine): void {
 
 function stack(cfg: Config) {
   const rpc = new SolanaRpc(cfg.rpcUrl);
-  const jito = new JitoEngine(cfg.jitoEngine);
+  const jito = new JitoMulti(cfg.jitoEngines.map((u) => new JitoEngine(u)));
   const store = new Store(makeDb(cfg.databaseUrl));
-  const stream = new Yellowstone(cfg.grpcUrl, cfg.grpcToken, watchSet(cfg));
+  const accounts = watchSet(cfg);
+  const stream = new MultiStream(
+    grpcProviders(cfg).map((p) => new Yellowstone(p.name, p.url, p.token, accounts)),
+  );
   checkTipAccounts(jito);
   const oracle = new TipOracle();
   const leader = new LeaderWindow(jito);
@@ -107,7 +126,7 @@ async function serve(cfg: Config): Promise<void> {
 
 async function construct(cfg: Config): Promise<void> {
   if (!cfg.walletPubkey) throw new Error("set WALLET_PUBKEY to build an unsigned bundle");
-  const jito = new JitoEngine(cfg.jitoEngine);
+  const jito = new JitoMulti(cfg.jitoEngines.map((u) => new JitoEngine(u)));
   const builder = new BundleBuilder(new SolanaRpc(cfg.rpcUrl), await jito.tipAccounts());
   const unsigned = await builder.buildUnsigned(new SelfTransferMemo(), new PublicKey(cfg.walletPubkey), 10_000);
   info("construct", "unsigned bundle ready (sign client-side)", unsigned);
