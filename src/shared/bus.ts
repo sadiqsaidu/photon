@@ -15,6 +15,7 @@ export type PhotonEvent =
   | { type: "tip_policy"; anchor: string; multiplier: number; tip: number; reasoning: string; confidence: number }
   | { type: "agent"; kind: "recovery" | "failure_reasoning"; signature: string; action: string; reasoning: string; confidence: number }
   | { type: "stream"; connected: boolean; dropped: number; reconnects: number }
+  | { type: "leader"; slotsToLeader: number; windowOpen: boolean; leaderIdentity: string | null }
   | {
       type: "stream_race";
       providers: {

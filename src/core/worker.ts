@@ -7,13 +7,14 @@ import { bus } from "../shared/bus.js";
 import { LifecycleTracker } from "./lifecycle.js";
 import { LeaderWindow } from "./leader.js";
 import { TipOracle } from "./tip-oracle.js";
+import { BlockhashCache } from "./blockhash.js";
 
 const JITO_MIN_TIP = 1000;
 
 export class Worker implements SubmitContext {
   private readonly tracker: LifecycleTracker;
   private policy: TipPolicy | null = null;
-  private slots = 0;
+  private policyTimer: NodeJS.Timeout | null = null;
   onSubmittedFailure?: (l: Lifecycle) => Promise<void>;
 
   constructor(
@@ -24,10 +25,12 @@ export class Worker implements SubmitContext {
     private readonly agent: DecisionPort,
     private readonly store: Store,
     private readonly tipCeiling: number,
+    private readonly blockhash: BlockhashCache,
   ) {
     this.tracker = new LifecycleTracker(
       (l) => void this.onSettled(l),
       (l) => this.publishLifecycle(l),
+      (id) => this.jito.bundleStatus(id),
     );
   }
 
@@ -44,11 +47,13 @@ export class Worker implements SubmitContext {
   }
 
   track(l: Lifecycle, ttlMs: number): void {
-    this.tracker.track(l, ttlMs);
+    // Record the leader window this submission is aiming for, so the tracker
+    // can tell "leader skipped" apart from "bundle dropped".
+    this.tracker.track(l, ttlMs, this.leader.window());
   }
 
   slotsToLeader(): number {
-    return this.slots;
+    return this.leader.status().slotsToLeader;
   }
 
   tip(): { tip: Lamports; trace: DecisionTrace | null } {
@@ -60,19 +65,33 @@ export class Worker implements SubmitContext {
   }
 
   start(): void {
+    this.leader.start();
     void this.refreshPolicy();
-    setInterval(() => void this.refreshPolicy(), 20_000);
+    this.policyTimer = setInterval(() => void this.refreshPolicy(), 20_000);
     void this.consume();
+  }
+
+  close(): void {
+    if (this.policyTimer) clearInterval(this.policyTimer);
+    this.policyTimer = null;
+    this.leader.close();
   }
 
   private async consume(): Promise<void> {
     for await (const ev of this.stream.events()) {
-      if (ev.kind === "slot") {
-        this.leader.observe(ev.slot);
-        this.tracker.onSlot(ev.slot, ev.commitment);
-        bus.publish({ type: "slot", slot: ev.slot, commitment: ev.commitment });
-      } else {
-        this.tracker.onTx(ev.signature, ev.slot, ev.err);
+      switch (ev.kind) {
+        case "slot":
+          this.leader.observe(ev.slot);
+          this.tracker.onSlot(ev.slot, ev.commitment);
+          bus.publish({ type: "slot", slot: ev.slot, commitment: ev.commitment });
+          break;
+        case "tx":
+          this.tracker.onTx(ev.signature, ev.slot, ev.err);
+          break;
+        case "block":
+          this.blockhash.onBlock(ev);
+          this.tracker.onBlock(this.blockhash.currentHeight());
+          break;
       }
     }
   }
@@ -80,8 +99,7 @@ export class Worker implements SubmitContext {
   private async refreshPolicy(): Promise<void> {
     try {
       const floor = await this.oracle.refresh();
-      const { slotsToLeader } = await this.leader.status();
-      this.slots = slotsToLeader;
+      const { slotsToLeader } = this.leader.status();
       this.policy = await this.agent.tipPolicy({
         floor,
         landRate: this.oracle.landRate(),

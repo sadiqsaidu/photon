@@ -41,8 +41,13 @@ export class Submitter {
     const signer = this.signer;
     if (!signer) throw new Error("no server signer; submit requires a Signer");
     const { tip, trace } = opts.tip !== undefined ? { tip: opts.tip, trace: null } : this.ctx.tip();
-    const stale = opts.fault ? bs58.encode(randomBytes(32)) : undefined;
-    const { base64, signature } = await this.builder.buildAndSign(payload, signer, tip, stale);
+    // Fault demo: a fabricated hash is expired by definition (lvbh 0), so the
+    // tracker classifies it as a true expiry as soon as a block streams in.
+    const override = opts.fault
+      ? { blockhash: bs58.encode(randomBytes(32)), lastValidBlockHeight: 0, source: "injected" as const }
+      : undefined;
+    const built = await this.builder.buildAndSign(payload, signer, tip, override);
+    const { base64, signature } = built;
 
     let bundleId: string | null = null;
     try {
@@ -65,9 +70,22 @@ export class Submitter {
       failure: null,
       retryOf: opts.retryOf ?? null,
       trace,
+      lastValidBlockHeight: built.lastValidBlockHeight,
+      landedSlot: null,
+      blockhashSource: built.blockhashSource,
+      landedPerBundleStatus: null,
+      targetLeaderSkipped: false,
     };
     this.ctx.track(l, opts.ttlMs ?? 60_000);
-    info("submit", "submitted", { signature, tip, bundleId, attempt, fault: Boolean(opts.fault) });
+    info("submit", "submitted", {
+      signature,
+      tip,
+      bundleId,
+      attempt,
+      blockhashSource: built.blockhashSource,
+      lastValidBlockHeight: built.lastValidBlockHeight,
+      fault: Boolean(opts.fault),
+    });
     return signature;
   }
 
@@ -93,6 +111,11 @@ export class Submitter {
       failure: null,
       retryOf: null,
       trace: null,
+      lastValidBlockHeight: null,
+      landedSlot: null,
+      blockhashSource: null,
+      landedPerBundleStatus: null,
+      targetLeaderSkipped: false,
     };
     this.ctx.track(l, 60_000);
     info("submit", "submitted (external)", { signature: input.signature, bundleId });

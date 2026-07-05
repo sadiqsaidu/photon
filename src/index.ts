@@ -11,6 +11,7 @@ import { signerFromSecret } from "./adapters/signer.js";
 import { Agent } from "./agent/index.js";
 import type { LlmClient } from "./shared/ports.js";
 import { BundleBuilder, SelfTransferMemo } from "./core/builder.js";
+import { BlockhashCache } from "./core/blockhash.js";
 import { TipOracle } from "./core/tip-oracle.js";
 import { LeaderWindow } from "./core/leader.js";
 import { NetworkMonitor } from "./core/network.js";
@@ -79,12 +80,13 @@ function stack(cfg: Config) {
   );
   checkTipAccounts(jito);
   const oracle = new TipOracle();
-  const leader = new LeaderWindow(jito);
+  const monitor = new NetworkMonitor(rpc, oracle);
+  const leader = new LeaderWindow(jito, rpc, (id) => monitor.isJito(id));
+  const blockhash = new BlockhashCache();
   const llm = makeLlm(cfg);
   const agent = new Agent(llm.client, llm.model, cfg.tipCeiling);
-  const worker = new Worker(stream, jito, oracle, leader, agent, store, cfg.tipCeiling);
-  const monitor = new NetworkMonitor(rpc, oracle);
-  return { rpc, jito, store, oracle, agent, worker, monitor };
+  const worker = new Worker(stream, jito, oracle, leader, agent, store, cfg.tipCeiling, blockhash);
+  return { rpc, jito, store, oracle, agent, worker, monitor, leader, blockhash, stream };
 }
 
 async function observe(cfg: Config): Promise<void> {
@@ -98,7 +100,7 @@ async function submitMode(cfg: Config, fault: boolean): Promise<void> {
   if (!cfg.walletSecret) throw new Error("set WALLET_SECRET (throwaway) to run submit/fault");
   const s = stack(cfg);
   const signer = signerFromSecret(cfg.walletSecret);
-  const builder = new BundleBuilder(s.rpc, await s.jito.tipAccounts());
+  const builder = new BundleBuilder(s.rpc, await s.jito.tipAccounts(), s.blockhash);
   const submitter = new Submitter(builder, s.jito, signer, s.agent, s.oracle, s.store, s.worker);
   s.worker.onSubmittedFailure = (l) => submitter.onFailure(l);
   s.worker.start();
@@ -113,7 +115,7 @@ async function submitMode(cfg: Config, fault: boolean): Promise<void> {
 
 async function serve(cfg: Config): Promise<void> {
   const s = stack(cfg);
-  const builder = new BundleBuilder(s.rpc, await s.jito.tipAccounts());
+  const builder = new BundleBuilder(s.rpc, await s.jito.tipAccounts(), s.blockhash);
   const signer = cfg.walletSecret ? signerFromSecret(cfg.walletSecret) : undefined;
   const submitter = new Submitter(builder, s.jito, signer, s.agent, s.oracle, s.store, s.worker);
   s.worker.onSubmittedFailure = (l) => submitter.onFailure(l);

@@ -77,7 +77,7 @@ function request(accounts: string[]): SubscribeRequest {
     },
     transactionsStatus: {},
     blocks: {},
-    blocksMeta: {},
+    blocksMeta: { client: {} },
     entry: {},
     accountsDataSlice: [],
     commitment: CommitmentLevel.PROCESSED,
@@ -154,6 +154,19 @@ export class Yellowstone implements StreamSource, RawStreamProvider {
           signature: bs58.encode(sig),
           slot: Number(u.transaction.slot),
           err: u.transaction.transaction?.meta?.err ?? null,
+        },
+        recvAt,
+      );
+    }
+    const height = u.blockMeta?.blockHeight?.blockHeight;
+    if (u.blockMeta && height !== undefined) {
+      this.push(
+        {
+          kind: "block",
+          slot: Number(u.blockMeta.slot),
+          blockhash: u.blockMeta.blockhash,
+          blockHeight: Number(height),
+          parentBlockhash: u.blockMeta.parentBlockhash,
         },
         recvAt,
       );

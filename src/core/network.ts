@@ -19,6 +19,10 @@ export class NetworkMonitor {
     private readonly oracle: TipOracle,
   ) {}
 
+  isJito(identity: string): boolean {
+    return this.jito.has(identity);
+  }
+
   start(): void {
     void this.refreshJito();
     setInterval(() => void this.refreshJito(), JITO_REFRESH_MS);

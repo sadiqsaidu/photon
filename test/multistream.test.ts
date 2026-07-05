@@ -100,7 +100,7 @@ test("killing provider A mid-stream leaves provider B flowing with zero gap", as
   const events = await collect(m, 4, 200);
   assert.equal(events.length, 4);
   assert.deepEqual(
-    events.map((e) => (e.kind === "slot" ? e.slot : e.signature)),
+    events.map((e) => (e.kind === "slot" ? e.slot : e.kind === "tx" ? e.signature : e.blockhash)),
     [1, 2, 3, "sigX"],
   );
   const snap = m.raceSnapshot();

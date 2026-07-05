@@ -14,7 +14,8 @@ export type FailureClass =
 
 export type StreamEvent =
   | { kind: "slot"; slot: Slot; parent: Slot | null; commitment: Commitment }
-  | { kind: "tx"; signature: string; slot: Slot; err: unknown | null };
+  | { kind: "tx"; signature: string; slot: Slot; err: unknown | null }
+  | { kind: "block"; slot: Slot; blockhash: string; blockHeight: number; parentBlockhash: string };
 
 // A raw per-provider event, tagged so MultiStream can race providers.
 export interface TaggedStreamEvent {
@@ -33,6 +34,10 @@ export interface DecisionTrace {
   confidence: number;
 }
 
+// Where the recent blockhash for a bundle came from. "injected" is the
+// fault-demo path (fabricated, already-expired hash).
+export type BlockhashSource = "stream" | "rpc" | "injected";
+
 export interface Lifecycle {
   signature: string;
   source: "observed" | "submitted";
@@ -43,6 +48,12 @@ export interface Lifecycle {
   failure: FailureClass | null;
   retryOf: string | null;
   trace: DecisionTrace | null;
+  lastValidBlockHeight: number | null;
+  landedSlot: Slot | null;
+  blockhashSource: BlockhashSource | null;
+  // Result of the one-shot bundleStatus check at TTL (null = never checked).
+  landedPerBundleStatus: boolean | null;
+  targetLeaderSkipped: boolean;
 }
 
 export interface TipFloor {
