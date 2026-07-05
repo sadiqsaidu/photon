@@ -10,7 +10,7 @@ import { base64ToBytes, bytesToBase64, sol } from "@/lib/format";
 
 type Mode = "transfer" | "raw";
 
-export function BundleBuilder() {
+export function BuildDock() {
   const { publicKey, signTransaction } = useWallet();
   const { state } = useStore();
   const suggested = state.tipPolicy?.tip ?? 10_000;
@@ -55,69 +55,61 @@ export function BundleBuilder() {
   }
 
   return (
-    <div className="card">
+    <div className="panel p-4">
       <div className="mb-3 flex items-center justify-between">
-        <span className="label">build bundle</span>
-        <div className="flex gap-1 text-[11px]">
+        <span className="label">launch</span>
+        <div className="flex gap-px">
           {(["transfer", "raw"] as Mode[]).map((m) => (
             <button
               key={m}
               onClick={() => setMode(m)}
-              className={`rounded px-2 py-1 ${mode === m ? "bg-white/[0.08] text-zinc-200" : "text-zinc-500"}`}
+              className={`border px-2 py-1 text-[10px] uppercase tracking-wider transition-colors ${
+                mode === m ? "border-bone-faint bg-coal-raise text-bone" : "border-line text-bone-faint hover:text-bone-dim"
+              }`}
             >
-              {m === "transfer" ? "SOL transfer" : "raw / advanced"}
+              {m === "transfer" ? "sol" : "raw"}
             </button>
           ))}
         </div>
       </div>
 
       {mode === "transfer" ? (
-        <div className="space-y-2.5">
-          <input
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-            placeholder="recipient address"
-            className="num w-full rounded-md border border-white/10 bg-ink-900 px-3 py-2 text-[12px] text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-accent/40"
-          />
-          <div className="flex gap-2.5">
+        <div className="space-y-2">
+          <input value={to} onChange={(e) => setTo(e.target.value)} placeholder="recipient address" className="field" />
+          <div className="flex gap-2">
             <label className="flex-1">
-              <span className="text-[10px] text-zinc-500">amount (SOL)</span>
-              <input
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                className="num mt-1 w-full rounded-md border border-white/10 bg-ink-900 px-3 py-2 text-[12px] text-zinc-200 outline-none focus:border-accent/40"
-              />
+              <span className="text-[9px] uppercase tracking-widest text-bone-faint">amount sol</span>
+              <input value={amount} onChange={(e) => setAmount(e.target.value)} className="field mt-1" />
             </label>
             <label className="flex-1">
-              <span className="text-[10px] text-zinc-500">tip (lamports)</span>
-              <input
-                value={tip}
-                onChange={(e) => setTip(Number(e.target.value) || 0)}
-                className="num mt-1 w-full rounded-md border border-white/10 bg-ink-900 px-3 py-2 text-[12px] text-zinc-200 outline-none focus:border-accent/40"
-              />
+              <span className="text-[9px] uppercase tracking-widest text-bone-faint">tip lamports</span>
+              <input value={tip} onChange={(e) => setTip(Number(e.target.value) || 0)} className="field mt-1" />
             </label>
           </div>
-          <button onClick={() => setTip(suggested)} className="text-[11px] text-accent hover:underline">
-            use AI tip · {sol(suggested)} SOL
+          <button
+            onClick={() => setTip(suggested)}
+            className="text-[10px] uppercase tracking-wider text-gilt hover:text-bone"
+          >
+            ↳ take the mind&apos;s tip · {sol(suggested)}
           </button>
         </div>
       ) : (
         <textarea
           value={raw}
           onChange={(e) => setRaw(e.target.value)}
-          placeholder="paste base64 signed transactions, one per line"
+          placeholder="base64 signed transactions, one per line"
           rows={4}
-          className="num w-full resize-none rounded-md border border-white/10 bg-ink-900 px-3 py-2 text-[11px] text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-accent/40"
+          className="field resize-none text-[11px]"
         />
       )}
 
       <button
         onClick={mode === "transfer" ? submitTransfer : submitRaw}
-        className="mt-3 w-full rounded-md border border-accent/40 bg-accent/10 px-3 py-2.5 text-[13px] font-medium text-accent hover:bg-accent/20"
+        className="mt-3 w-full border border-ember-dim bg-ember-deep px-3 py-2.5 text-[12px] font-bold uppercase tracking-widest text-ember transition-colors hover:border-ember hover:bg-ember/15"
       >
-        {publicKey || mode === "raw" ? "Submit bundle" : "Connect wallet to submit"}
+        {publicKey || mode === "raw" ? "fire bundle" : "connect wallet"}
       </button>
-      {status && <div className="num mt-2 break-all text-[11px] text-zinc-500">{status}</div>}
+      {status && <div className="mt-2 break-all text-[10px] tabular-nums text-bone-faint">{status}</div>}
     </div>
   );
 }

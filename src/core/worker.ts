@@ -144,6 +144,10 @@ export class Worker implements SubmitContext {
         reasoning: this.policy.trace.reasoning,
         confidence: this.policy.trace.confidence,
         floorSource: floor.source,
+        landRate: this.oracle.landRate(),
+        slotsToLeader,
+        windowOpen: open,
+        forecast,
       });
       info("agent", "tip policy", {
         anchor: this.policy.anchor,
