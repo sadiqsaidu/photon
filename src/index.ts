@@ -17,7 +17,8 @@ import { Submitter } from "./core/submission.js";
 import { createApi } from "./api/server.js";
 import { makeDb } from "./db/index.js";
 import { Store } from "./db/store.js";
-import { info } from "./shared/log.js";
+import { info, warn } from "./shared/log.js";
+import { JITO_TIP_ACCOUNTS } from "./core/constants.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -27,11 +28,37 @@ function makeLlm(cfg: Config): { client: LlmClient; model: string } {
   throw new Error("set OPENROUTER_API_KEY or GEMINI_API_KEY");
 }
 
+// Watch our own wallet plus every Jito tip account: the builder picks a random
+// tip account per bundle, so watching a single account would miss ~7/8 of our
+// own submissions and misclassify them as expired.
+function watchSet(cfg: Config): string[] {
+  const walletPubkey = cfg.walletSecret
+    ? signerFromSecret(cfg.walletSecret).publicKey
+    : cfg.walletPubkey;
+  return [...new Set([cfg.watchAccount, ...(walletPubkey ? [walletPubkey] : []), ...JITO_TIP_ACCOUNTS])];
+}
+
+function checkTipAccounts(jito: JitoEngine): void {
+  void jito
+    .tipAccounts()
+    .then((remote) => {
+      const local = new Set<string>(JITO_TIP_ACCOUNTS);
+      const remoteSet = new Set(remote);
+      const diff = [
+        ...remote.filter((a) => !local.has(a)),
+        ...JITO_TIP_ACCOUNTS.filter((a) => !remoteSet.has(a)),
+      ];
+      if (diff.length > 0) warn("jito", "tip account set differs from hardcoded constants", { diff });
+    })
+    .catch((e: unknown) => warn("jito", "tip account cross-check failed", String(e)));
+}
+
 function stack(cfg: Config) {
   const rpc = new SolanaRpc(cfg.rpcUrl);
   const jito = new JitoEngine(cfg.jitoEngine);
   const store = new Store(makeDb(cfg.databaseUrl));
-  const stream = new Yellowstone(cfg.grpcUrl, cfg.grpcToken, cfg.watchAccount);
+  const stream = new Yellowstone(cfg.grpcUrl, cfg.grpcToken, watchSet(cfg));
+  checkTipAccounts(jito);
   const oracle = new TipOracle();
   const leader = new LeaderWindow(jito);
   const llm = makeLlm(cfg);

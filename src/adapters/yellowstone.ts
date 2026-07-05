@@ -47,7 +47,7 @@ class EventQueue {
   }
 }
 
-function request(account: string): SubscribeRequest {
+function request(accounts: string[]): SubscribeRequest {
   return {
     accounts: {},
     slots: { client: { filterByCommitment: false } },
@@ -55,7 +55,7 @@ function request(account: string): SubscribeRequest {
       client: {
         vote: false,
         failed: true,
-        accountInclude: [account],
+        accountInclude: accounts,
         accountExclude: [],
         accountRequired: [],
       },
@@ -76,7 +76,7 @@ export class Yellowstone implements StreamSource {
   private reconnects = 0;
   private connected = false;
 
-  constructor(url: string, token: string | undefined, private readonly account: string) {
+  constructor(url: string, token: string | undefined, private readonly accounts: string[]) {
     this.client = new Client(url, token, {
       "grpc.max_receive_message_length": 64 * 1024 * 1024,
     });
@@ -130,7 +130,7 @@ export class Yellowstone implements StreamSource {
           stream.on("data", (u: SubscribeUpdate) => this.map(u));
           stream.on("error", reject);
           stream.on("end", resolve);
-          stream.write(request(this.account), (err: unknown) => {
+          stream.write(request(this.accounts), (err: unknown) => {
             if (err) reject(err);
             else this.health(true);
           });

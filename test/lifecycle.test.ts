@@ -51,6 +51,20 @@ test("submitted bundle lands and seals successfully", () => {
   assert.ok(settled[0]!.stages.submitted && settled[0]!.stages.finalized);
 });
 
+// Phase 0 regression: our own submissions are observed via the tip-account watch
+// set; once onTx arrives (whatever account matched), the entry must settle clean.
+test("tracked submitted signature with onTx + finalized settles with failure: null", () => {
+  const settled: Lifecycle[] = [];
+  const t = new LifecycleTracker((l) => settled.push(l));
+  t.track(submitted("sigTip"), 60_000);
+  t.onTx("sigTip", 500, null);
+  t.onSlot(500, "confirmed");
+  t.onSlot(500, "finalized");
+  assert.equal(settled.length, 1);
+  assert.equal(settled[0]!.failure, null);
+  assert.equal(settled[0]!.source, "submitted");
+});
+
 test("failed observed tx settles with a classified failure", () => {
   const settled: Lifecycle[] = [];
   const t = new LifecycleTracker((l) => settled.push(l));
