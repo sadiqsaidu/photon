@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { API_BASE } from "./api";
-import type { Commitment, FailureClass, PhotonEvent, Stage, StageMark } from "./events";
+import type { Commitment, FailureClass, Forecast, PhotonEvent, RaceProvider, Stage, StageMark } from "./events";
 
 export interface Lifecycle {
   signature: string;
@@ -29,6 +29,13 @@ export interface TipPolicy {
   tip: number;
   reasoning: string;
   confidence: number;
+  floorSource: "local" | "rest";
+  landRate: number;
+  slotsToLeader: number;
+  windowOpen: boolean;
+  forecast: Forecast;
+  at: number;
+  atSlot: number;
 }
 
 export interface NetworkState {
@@ -43,6 +50,19 @@ export interface NetworkState {
   tipFloor: number;
 }
 
+export interface RaceState {
+  providers: RaceProvider[];
+  dropped: number;
+  at: number;
+}
+
+export interface LeaderState {
+  slotsToLeader: number;
+  windowOpen: boolean;
+  leaderIdentity: string | null;
+  atSlot: number;
+}
+
 interface State {
   slot: number;
   commitment: Commitment;
@@ -51,6 +71,8 @@ interface State {
   order: string[];
   tipPolicy: TipPolicy | null;
   agent: AgentEntry[];
+  race: RaceState | null;
+  leader: LeaderState | null;
   healthMs: number | null;
   lastEventAt: number;
 }
@@ -65,6 +87,8 @@ const initial: State = {
   order: [],
   tipPolicy: null,
   agent: [],
+  race: null,
+  leader: null,
   healthMs: null,
   lastEventAt: 0,
 };
@@ -91,7 +115,20 @@ function reduceInner(s: State, ev: PhotonEvent): State {
     case "tip_policy":
       return {
         ...s,
-        tipPolicy: { anchor: ev.anchor, multiplier: ev.multiplier, tip: ev.tip, reasoning: ev.reasoning, confidence: ev.confidence },
+        tipPolicy: {
+          anchor: ev.anchor,
+          multiplier: ev.multiplier,
+          tip: ev.tip,
+          reasoning: ev.reasoning,
+          confidence: ev.confidence,
+          floorSource: ev.floorSource,
+          landRate: ev.landRate,
+          slotsToLeader: ev.slotsToLeader,
+          windowOpen: ev.windowOpen,
+          forecast: ev.forecast,
+          at: Date.now(),
+          atSlot: s.slot,
+        },
       };
     case "agent":
       return {
@@ -100,6 +137,13 @@ function reduceInner(s: State, ev: PhotonEvent): State {
           { kind: ev.kind, signature: ev.signature, action: ev.action, reasoning: ev.reasoning, confidence: ev.confidence, at: Date.now() },
           ...s.agent,
         ].slice(0, MAX),
+      };
+    case "stream_race":
+      return { ...s, race: { providers: ev.providers, dropped: ev.dropped, at: Date.now() } };
+    case "leader":
+      return {
+        ...s,
+        leader: { slotsToLeader: ev.slotsToLeader, windowOpen: ev.windowOpen, leaderIdentity: ev.leaderIdentity, atSlot: s.slot },
       };
     case "stream":
       return s;

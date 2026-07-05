@@ -136,10 +136,17 @@ cp .env.example .env.local   # NEXT_PUBLIC_API_BASE (default http://localhost:80
 npm run dev                  # http://localhost:3000  (expects the backend in serve mode)
 ```
 
-The dashboard renders the live transaction journey, the bundle-flow animation,
-the agent's reasoning feed, and a wallet-connector submit flow. Connect a wallet
-to submit: the frontend calls `/bundle/prepare`, the wallet signs, and the
-frontend posts the signed transaction to `/bundle/submit`.
+The dashboard is a terminal-style "signal deck": a rolling slot odometer and
+epoch hairline up top; hero numerals (AI tip, land rate, forecast trend, stream
+race) on the left; the live **tip surface** in the middle — crimson tip floor,
+amber agent tip steps, dashed Holt forecast past the "now" line, with every
+policy decision pinned to the chart as a hoverable node; **tracers** below it
+animate each bundle through submitted → processed → confirmed → finalized, and
+a failed lane grows the agent's recovery verdict in place; the Jito leader
+window slides toward "now" on the right; and the agent's reasoning types out
+live in the stdout bar at the bottom. Connect a wallet to submit: the frontend
+calls `/bundle/prepare`, the wallet signs, and the frontend posts the signed
+transaction to `/bundle/submit`.
 
 ### API reference (serve mode)
 

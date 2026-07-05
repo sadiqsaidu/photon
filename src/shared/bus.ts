@@ -20,6 +20,10 @@ export type PhotonEvent =
       reasoning: string;
       confidence: number;
       floorSource: "local" | "rest";
+      landRate: number;
+      slotsToLeader: number;
+      windowOpen: boolean;
+      forecast: { p50AtLanding: number; trendPctPer10Slots: number; volatility: number };
     }
   | { type: "agent"; kind: "recovery" | "failure_reasoning"; signature: string; action: string; reasoning: string; confidence: number }
   | { type: "stream"; connected: boolean; dropped: number; reconnects: number }
