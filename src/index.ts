@@ -13,6 +13,8 @@ import type { LlmClient } from "./shared/ports.js";
 import { BundleBuilder, SelfTransferMemo } from "./core/builder.js";
 import { BlockhashCache } from "./core/blockhash.js";
 import { TipOracle } from "./core/tip-oracle.js";
+import { TipStream } from "./core/tip-stream.js";
+import { TipForecaster } from "./core/tip-forecast.js";
 import { LeaderWindow } from "./core/leader.js";
 import { NetworkMonitor } from "./core/network.js";
 import { Worker } from "./core/worker.js";
@@ -79,13 +81,16 @@ function stack(cfg: Config) {
     grpcProviders(cfg).map((p) => new Yellowstone(p.name, p.url, p.token, accounts)),
   );
   checkTipAccounts(jito);
-  const oracle = new TipOracle();
+  const tipStream = new TipStream();
+  const forecaster = new TipForecaster();
+  tipStream.onSlotP50 = (_slot, p50) => forecaster.observe(p50);
+  const oracle = new TipOracle(tipStream);
   const monitor = new NetworkMonitor(rpc, oracle);
   const leader = new LeaderWindow(jito, rpc, (id) => monitor.isJito(id));
   const blockhash = new BlockhashCache();
   const llm = makeLlm(cfg);
   const agent = new Agent(llm.client, llm.model, cfg.tipCeiling);
-  const worker = new Worker(stream, jito, oracle, leader, agent, store, cfg.tipCeiling, blockhash);
+  const worker = new Worker(stream, jito, oracle, leader, agent, store, cfg.tipCeiling, blockhash, tipStream, forecaster);
   return { rpc, jito, store, oracle, agent, worker, monitor, leader, blockhash, stream };
 }
 
@@ -101,7 +106,7 @@ async function submitMode(cfg: Config, fault: boolean): Promise<void> {
   const s = stack(cfg);
   const signer = signerFromSecret(cfg.walletSecret);
   const builder = new BundleBuilder(s.rpc, await s.jito.tipAccounts(), s.blockhash);
-  const submitter = new Submitter(builder, s.jito, signer, s.agent, s.oracle, s.store, s.worker);
+  const submitter = new Submitter(builder, s.jito, signer, s.agent, s.oracle, s.store, s.worker, s.blockhash, s.leader);
   s.worker.onSubmittedFailure = (l) => submitter.onFailure(l);
   s.worker.start();
 
@@ -117,7 +122,7 @@ async function serve(cfg: Config): Promise<void> {
   const s = stack(cfg);
   const builder = new BundleBuilder(s.rpc, await s.jito.tipAccounts(), s.blockhash);
   const signer = cfg.walletSecret ? signerFromSecret(cfg.walletSecret) : undefined;
-  const submitter = new Submitter(builder, s.jito, signer, s.agent, s.oracle, s.store, s.worker);
+  const submitter = new Submitter(builder, s.jito, signer, s.agent, s.oracle, s.store, s.worker, s.blockhash, s.leader);
   s.worker.onSubmittedFailure = (l) => submitter.onFailure(l);
   s.worker.start();
   s.monitor.start();

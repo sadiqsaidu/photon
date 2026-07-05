@@ -15,7 +15,10 @@ export type FailureClass =
 export type StreamEvent =
   | { kind: "slot"; slot: Slot; parent: Slot | null; commitment: Commitment }
   | { kind: "tx"; signature: string; slot: Slot; err: unknown | null }
-  | { kind: "block"; slot: Slot; blockhash: string; blockHeight: number; parentBlockhash: string };
+  | { kind: "block"; slot: Slot; blockhash: string; blockHeight: number; parentBlockhash: string }
+  // A lamport transfer into a Jito tip account, observed on-stream. The
+  // signature is carried for cross-provider dedup.
+  | { kind: "tip"; slot: Slot; lamports: Lamports; signature: string };
 
 // A raw per-provider event, tagged so MultiStream can race providers.
 export interface TaggedStreamEvent {

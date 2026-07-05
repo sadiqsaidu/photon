@@ -124,6 +124,7 @@ export class MultiStream implements StreamSource {
   private dedup(e: StreamEvent): { lru: LruMap<Seen>; key: string } {
     if (e.kind === "slot") return { lru: this.slots, key: `s:${e.slot}:${e.commitment}` };
     if (e.kind === "block") return { lru: this.slots, key: `b:${e.slot}` };
+    if (e.kind === "tip") return { lru: this.txs, key: `p:${e.signature}` };
     return { lru: this.txs, key: `t:${e.signature}` };
   }
 

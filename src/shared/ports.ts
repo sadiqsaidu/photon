@@ -55,11 +55,20 @@ export interface Signer {
   sign(message: Uint8Array): Promise<Uint8Array>;
 }
 
+export interface TipForecastView {
+  p50AtLanding: Lamports;
+  trendPctPer10Slots: number;
+  volatility: number;
+}
+
 export interface TipContext {
   floor: TipFloor;
   landRate: number;
   inFlight: number;
   slotsToLeader: number;
+  forecast: TipForecastView;
+  windowOpen: boolean;
+  floorSource: "local" | "rest";
 }
 
 export interface TipPolicy {
@@ -75,6 +84,9 @@ export interface RecoveryContext {
   floor: TipFloor;
   slotsToLeader: number;
   attempt: number;
+  blockhashStillValid: boolean;
+  landedPerBundleStatus: boolean;
+  targetLeaderSkipped: boolean;
 }
 
 export interface RecoveryDecision {

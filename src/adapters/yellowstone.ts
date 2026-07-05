@@ -3,6 +3,7 @@ import bs58 from "bs58";
 import type { RawStreamProvider, StreamSource } from "../shared/ports.js";
 import type { Commitment, StreamEvent, TaggedStreamEvent } from "../shared/types.js";
 import { warn } from "../shared/log.js";
+import { JITO_TIP_ACCOUNTS } from "../core/constants.js";
 
 type Pkg = typeof import("@triton-one/yellowstone-grpc");
 type SubscribeRequest = import("@triton-one/yellowstone-grpc").SubscribeRequest;
@@ -89,6 +90,7 @@ function request(accounts: string[]): SubscribeRequest {
 export class Yellowstone implements StreamSource, RawStreamProvider {
   private readonly client: Client;
   private readonly queue = new EventQueue<TaggedStreamEvent>(QUEUE_CAP, (t) => t.event.kind === "slot");
+  private readonly tipSet: Set<string>;
   private closed = false;
   private active: { cancel(): void } | null = null;
   reconnects = 0;
@@ -99,7 +101,9 @@ export class Yellowstone implements StreamSource, RawStreamProvider {
     url: string,
     token: string | undefined,
     private readonly accounts: string[],
+    tipAccounts: readonly string[] = JITO_TIP_ACCOUNTS,
   ) {
+    this.tipSet = new Set(tipAccounts);
     this.client = new Client(url, token, {
       "grpc.max_receive_message_length": 64 * 1024 * 1024,
     });
@@ -148,15 +152,18 @@ export class Yellowstone implements StreamSource, RawStreamProvider {
     }
     const sig = u.transaction?.transaction?.signature;
     if (sig && u.transaction) {
+      const signature = bs58.encode(sig);
+      const slot = Number(u.transaction.slot);
       this.push(
         {
           kind: "tx",
-          signature: bs58.encode(sig),
-          slot: Number(u.transaction.slot),
+          signature,
+          slot,
           err: u.transaction.transaction?.meta?.err ?? null,
         },
         recvAt,
       );
+      this.mapTip(u.transaction.transaction, signature, slot, recvAt);
     }
     const height = u.blockMeta?.blockHeight?.blockHeight;
     if (u.blockMeta && height !== undefined) {
@@ -170,6 +177,29 @@ export class Yellowstone implements StreamSource, RawStreamProvider {
         },
         recvAt,
       );
+    }
+  }
+
+  // If the tx moved lamports into a tip account, emit the amount as a tip
+  // observation (post - pre balance at the tip account's key index). Skips
+  // silently when the provider payload lacks meta or account keys.
+  private mapTip(
+    tx: import("@triton-one/yellowstone-grpc").SubscribeUpdateTransactionInfo | undefined,
+    signature: string,
+    slot: number,
+    recvAt: number,
+  ): void {
+    const meta = tx?.meta;
+    const keys = tx?.transaction?.message?.accountKeys;
+    if (!meta || !keys || meta.preBalances.length === 0 || meta.postBalances.length === 0) return;
+    const n = Math.min(keys.length, meta.preBalances.length, meta.postBalances.length);
+    for (let i = 0; i < n; i++) {
+      if (!this.tipSet.has(bs58.encode(keys[i] as Uint8Array))) continue;
+      const lamports = Number(meta.postBalances[i]) - Number(meta.preBalances[i]);
+      if (lamports > 0) {
+        this.push({ kind: "tip", slot, lamports, signature }, recvAt);
+        return;
+      }
     }
   }
 

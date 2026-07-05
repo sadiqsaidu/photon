@@ -8,6 +8,8 @@ import { LifecycleTracker } from "./lifecycle.js";
 import { LeaderWindow } from "./leader.js";
 import { TipOracle } from "./tip-oracle.js";
 import { BlockhashCache } from "./blockhash.js";
+import { TipStream } from "./tip-stream.js";
+import { TipForecaster } from "./tip-forecast.js";
 
 const JITO_MIN_TIP = 1000;
 
@@ -26,6 +28,8 @@ export class Worker implements SubmitContext {
     private readonly store: Store,
     private readonly tipCeiling: number,
     private readonly blockhash: BlockhashCache,
+    private readonly tipStream?: TipStream,
+    private readonly forecaster?: TipForecaster,
   ) {
     this.tracker = new LifecycleTracker(
       (l) => void this.onSettled(l),
@@ -92,6 +96,9 @@ export class Worker implements SubmitContext {
           this.blockhash.onBlock(ev);
           this.tracker.onBlock(this.blockhash.currentHeight());
           break;
+        case "tip":
+          this.tipStream?.observe(ev.slot, ev.lamports);
+          break;
       }
     }
   }
@@ -99,12 +106,23 @@ export class Worker implements SubmitContext {
   private async refreshPolicy(): Promise<void> {
     try {
       const floor = await this.oracle.refresh();
-      const { slotsToLeader } = this.leader.status();
+      const { slotsToLeader, open } = this.leader.status();
+      // Forecast at the expected landing slot; when the window is unknown
+      // (slotsToLeader < 0) assume a nominal 8 slots out.
+      const ahead = slotsToLeader >= 0 ? slotsToLeader : 8;
+      const f = this.forecaster?.forecast(ahead) ?? { p50: floor.p50, trendPctPer10Slots: 0, volatility: 0 };
       this.policy = await this.agent.tipPolicy({
         floor,
         landRate: this.oracle.landRate(),
         inFlight: this.tracker.active(),
         slotsToLeader,
+        forecast: {
+          p50AtLanding: f.p50 > 0 ? f.p50 : floor.p50,
+          trendPctPer10Slots: f.trendPctPer10Slots,
+          volatility: f.volatility,
+        },
+        windowOpen: open,
+        floorSource: floor.source,
       });
       await this.store.saveDecision("tip_policy", { floor, slotsToLeader }, this.policy, this.policy.trace);
       bus.publish({
@@ -114,6 +132,7 @@ export class Worker implements SubmitContext {
         tip: this.tip().tip,
         reasoning: this.policy.trace.reasoning,
         confidence: this.policy.trace.confidence,
+        floorSource: floor.source,
       });
       info("agent", "tip policy", {
         anchor: this.policy.anchor,
