@@ -1,14 +1,13 @@
-import type { BundleGateway } from "../shared/ports.js";
 import type { Slot } from "../shared/types.js";
 import { bus } from "../shared/bus.js";
 import { info, warn } from "../shared/log.js";
 
-const WINDOW_SLOTS = 4;
-const ANCHOR_MS = 30_000;
-const ANCHOR_MIN_GAP_MS = 5_000;
 const SCHEDULE_LIMIT = 5000;
 const SCHEDULE_REFETCH_MARGIN = 500;
 const KEEP_BEHIND = 100;
+// With no Jito window found (validator set still loading), rescan this often.
+const RESCAN_EVERY_SLOTS = 25;
+const SCHEDULE_RETRY_MS = 30_000;
 
 // The RPC surface the local schedule needs (SolanaRpc satisfies it).
 export interface LeaderRpc {
@@ -22,33 +21,41 @@ export interface LeaderStatus {
   leaderIdentity: string | null;
 }
 
-// Local leader schedule: getSlotLeaders gives identities for the next ~5000
-// slots; jito.nextLeader() anchors the next Jito window every 30 s; between
-// anchors the schedule is interpolated. observe()/status() are synchronous —
-// no HTTP on the per-slot hot path.
+export interface JitoWindow {
+  start: Slot;
+  end: Slot;
+  identity: string;
+  slotsAway: number;
+}
+
+// Fully local Jito leader windows: getSlotLeaders gives the identity for the
+// next ~5000 slots and the Kobe validator set says who runs jito-solana.
+// (getNextScheduledLeader is gRPC-searcher-only — the HTTP block engines 404
+// it — so nothing here talks to Jito at all.) observe()/status() are
+// synchronous: no HTTP on the per-slot hot path.
 export class LeaderWindow {
   private slot: Slot = 0;
-  private nextLeaderSlot: Slot = 0;
+  private target: JitoWindow | null = null;
   private open = false;
   private readonly leaderBySlot = new Map<Slot, string>();
   private scheduleEnd: Slot = 0;
   private epoch = -1;
-  private lastAnchorAt = 0;
-  private anchorWarned = false;
+  private lastScanSlot = 0;
   private fetchingSchedule = false;
   private timer: NodeJS.Timeout | null = null;
   private openWaiters: (() => void)[] = [];
 
   constructor(
-    private readonly jito: BundleGateway,
     private readonly rpc?: LeaderRpc,
     private readonly isJito?: (identity: string) => boolean,
   ) {}
 
   start(): void {
-    void this.anchor();
     void this.refreshSchedule();
-    this.timer = setInterval(() => void this.anchor(), ANCHOR_MS);
+    // retry loop until both the schedule and the validator set have landed
+    this.timer = setInterval(() => {
+      if (this.scheduleEnd === 0) void this.refreshSchedule();
+    }, SCHEDULE_RETRY_MS);
   }
 
   close(): void {
@@ -57,18 +64,26 @@ export class LeaderWindow {
     this.openWaiters = [];
   }
 
+  currentSlot(): Slot {
+    return this.slot;
+  }
+
   // Hot path: called for every streamed slot. Synchronous recompute only.
   observe(slot: Slot): void {
     if (slot <= this.slot) return;
     this.slot = slot;
-    if (this.nextLeaderSlot > 0 && slot >= this.nextLeaderSlot + WINDOW_SLOTS) {
-      // Current anchor window has passed: interpolate from the local
-      // schedule, and (throttled) re-anchor in the background.
-      this.interpolateNext();
-      if (slot >= this.nextLeaderSlot + WINDOW_SLOTS) void this.anchor();
+
+    if (!this.target || slot > this.target.end) {
+      // No target (or it passed): rescan. When the scan keeps coming up empty
+      // (validator set not loaded yet) throttle to every 25 slots.
+      const throttled = this.target === null && slot - this.lastScanSlot < RESCAN_EVERY_SLOTS;
+      if (!throttled) {
+        this.lastScanSlot = slot;
+        this.target = this.scanFrom(slot)[0] ?? null;
+      }
     }
-    const open =
-      this.nextLeaderSlot > 0 && slot >= this.nextLeaderSlot && slot < this.nextLeaderSlot + WINDOW_SLOTS;
+
+    const open = this.target !== null && slot >= this.target.start && slot <= this.target.end;
     if (open !== this.open) {
       this.open = open;
       const s = this.status();
@@ -91,18 +106,24 @@ export class LeaderWindow {
   }
 
   status(): LeaderStatus {
-    if (this.nextLeaderSlot === 0) return { slotsToLeader: -1, open: false, leaderIdentity: null };
+    if (this.target === null) return { slotsToLeader: -1, open: false, leaderIdentity: null };
     return {
-      slotsToLeader: this.nextLeaderSlot - this.slot,
+      slotsToLeader: this.target.start - this.slot,
       open: this.open,
-      leaderIdentity: this.leaderBySlot.get(this.nextLeaderSlot) ?? null,
+      leaderIdentity: this.target.identity,
     };
   }
 
   // The slot range a bundle submitted right now is aiming for.
   window(): { start: Slot; end: Slot } | null {
-    if (this.nextLeaderSlot === 0) return null;
-    return { start: this.nextLeaderSlot, end: this.nextLeaderSlot + WINDOW_SLOTS - 1 };
+    if (this.target === null) return null;
+    return { start: this.target.start, end: this.target.end };
+  }
+
+  // The next `count` Jito leader windows from the local schedule (grouped by
+  // consecutive slots of the same identity). Powers the deck's windows table.
+  upcomingWindows(count: number): JitoWindow[] {
+    return this.scanFrom(this.slot, count);
   }
 
   // One-shot: fires when the window next flips open (agent "hold" support).
@@ -110,15 +131,22 @@ export class LeaderWindow {
     this.openWaiters.push(cb);
   }
 
-  private interpolateNext(): void {
-    if (!this.isJito) return;
-    for (let s = this.slot; s <= this.scheduleEnd; s++) {
+  private scanFrom(from: Slot, count = 1): JitoWindow[] {
+    const out: JitoWindow[] = [];
+    if (!this.isJito || from === 0) return out;
+    let s = Math.max(from, 1);
+    while (out.length < count && s <= this.scheduleEnd) {
       const id = this.leaderBySlot.get(s);
       if (id && this.isJito(id)) {
-        this.nextLeaderSlot = s;
-        return;
+        let end = s;
+        while (end + 1 <= this.scheduleEnd && this.leaderBySlot.get(end + 1) === id) end++;
+        out.push({ start: s, end, identity: id, slotsAway: s - this.slot });
+        s = end + 1;
+      } else {
+        s++;
       }
     }
+    return out;
   }
 
   private prune(): void {
@@ -126,30 +154,6 @@ export class LeaderWindow {
     for (const s of this.leaderBySlot.keys()) {
       if (s >= floor) break; // insertion order is ascending
       this.leaderBySlot.delete(s);
-    }
-  }
-
-  // Best-effort: never throws, so a Jito hiccup can't stall anything.
-  private async anchor(): Promise<void> {
-    if (Date.now() - this.lastAnchorAt < ANCHOR_MIN_GAP_MS) return;
-    this.lastAnchorAt = Date.now();
-    try {
-      const { currentSlot, nextLeaderSlot } = await this.jito.nextLeader();
-      if (currentSlot > this.slot) this.slot = currentSlot;
-      this.nextLeaderSlot = nextLeaderSlot;
-      this.anchorWarned = false;
-      const local = this.leaderBySlot.get(nextLeaderSlot);
-      if (local && this.isJito && !this.isJito(local)) {
-        warn("leader", "jito anchor disagrees with local schedule/validator set", {
-          nextLeaderSlot,
-          localLeader: local,
-        });
-      }
-    } catch (e) {
-      if (!this.anchorWarned) {
-        warn("leader", "next leader unavailable (window disabled)", String(e));
-        this.anchorWarned = true;
-      }
     }
   }
 

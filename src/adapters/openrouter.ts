@@ -4,16 +4,24 @@ const URL = "https://openrouter.ai/api/v1/chat/completions";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export class OpenRouter implements LlmClient {
-  constructor(private readonly apiKey: string) {}
+  // Free-tier models flake upstream; each model in the chain gets two tries
+  // before falling through to the next (OPENROUTER_MODEL is comma-separated).
+  constructor(
+    private readonly apiKey: string,
+    private readonly fallbackModels: string[] = [],
+  ) {}
 
   async complete(model: string, system: string, user: string): Promise<string> {
+    const chain = [model, ...this.fallbackModels.filter((m) => m !== model)];
     let lastErr: unknown;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        return await this.once(model, system, user);
-      } catch (e) {
-        lastErr = e;
-        await sleep(800);
+    for (const m of chain) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          return await this.once(m, system, user);
+        } catch (e) {
+          lastErr = e;
+          await sleep(800);
+        }
       }
     }
     throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));

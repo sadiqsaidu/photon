@@ -12,6 +12,9 @@ function boot() {
     submitter: {} as unknown as Submitter,
     defaultTip: () => 1000,
     hasSigner: false,
+    leaders: () => ({ currentSlot: 1, windowOpen: false, slotsToLeader: 5, slotMs: 400, windows: [] }),
+    engines: () => [],
+    simulate: async () => ({ err: null, logs: [], unitsConsumed: 0 }),
   });
   server.listen(0);
   const port = (server.address() as AddressInfo).port;
