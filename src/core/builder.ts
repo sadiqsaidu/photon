@@ -96,11 +96,15 @@ export class BundleBuilder {
   }
 
   // Zero-RPC hot path: prefer the streamed cache (< 2 s old); RPC remains the
-  // cold-start fallback.
-  private async pickBlockhash(override?: BlockhashOverride): Promise<BlockhashOverride> {
+  // cold-start fallback. preferStream=false is "standard" mode for wallet
+  // submissions: always sign against an RPC `confirmed` hash (safer than the
+  // processed-tip stream hash, which is what turbo mode opts into).
+  private async pickBlockhash(override?: BlockhashOverride, preferStream = true): Promise<BlockhashOverride> {
     if (override) return override;
-    const cached = this.cache?.fresh();
-    if (cached) return { ...cached, source: "stream" };
+    if (preferStream) {
+      const cached = this.cache?.fresh();
+      if (cached) return { ...cached, source: "stream" };
+    }
     const r = await this.rpc.latestBlockhash("confirmed");
     return { blockhash: r.blockhash, lastValidBlockHeight: r.lastValidBlockHeight, source: "rpc" };
   }
@@ -110,8 +114,9 @@ export class BundleBuilder {
     payer: PublicKey,
     tip: Lamports,
     override?: BlockhashOverride,
+    preferStream = true,
   ): Promise<{ message: MessageV0; tipAccount: string } & BlockhashOverride> {
-    const picked = await this.pickBlockhash(override);
+    const picked = await this.pickBlockhash(override, preferStream);
     const tipAccount = this.tipAccount();
     const message = new TransactionMessage({
       payerKey: payer,
@@ -125,8 +130,13 @@ export class BundleBuilder {
     return { message, tipAccount: tipAccount.toBase58(), ...picked };
   }
 
-  async buildUnsigned(payload: TxPayload, payer: PublicKey, tip: Lamports): Promise<UnsignedBundle> {
-    const a = await this.assemble(payload, payer, tip);
+  async buildUnsigned(
+    payload: TxPayload,
+    payer: PublicKey,
+    tip: Lamports,
+    opts: { turbo?: boolean } = {},
+  ): Promise<UnsignedBundle> {
+    const a = await this.assemble(payload, payer, tip, undefined, opts.turbo === true);
     return {
       messageBase64: Buffer.from(a.message.serialize()).toString("base64"),
       tipAccount: a.tipAccount,

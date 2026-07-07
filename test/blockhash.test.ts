@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import bs58 from "bs58";
+import { PublicKey } from "@solana/web3.js";
 import { BlockhashCache } from "../src/core/blockhash.js";
 import { BLOCKHASH_VALID_BLOCKS } from "../src/core/constants.js";
 import { BundleBuilder, SelfTransferMemo } from "../src/core/builder.js";
@@ -108,6 +109,23 @@ test("submit performs zero RPC calls once the blockhash cache is warm", async ()
   assert.equal(rpc.calls, 0);
   assert.equal(tracked[0]!.blockhashSource, "stream");
   assert.equal(tracked[0]!.lastValidBlockHeight, 90 + BLOCKHASH_VALID_BLOCKS);
+});
+
+test("buildUnsigned: standard mode signs RPC confirmed; turbo opts into the streamed tip hash", async () => {
+  const rpc = countingRpc();
+  const cache = new BlockhashCache();
+  cache.onBlock({ slot: 100, blockhash: HASH, blockHeight: 90 });
+  const builder = new BundleBuilder(rpc, [TIP_ACCOUNT], cache);
+  const payer = new PublicKey(ephemeralSigner().publicKey);
+
+  const standard = await builder.buildUnsigned(new SelfTransferMemo(), payer, 5000);
+  assert.equal(standard.blockhashSource, "rpc"); // safe default even with a warm cache
+  assert.equal(rpc.calls, 1);
+
+  const turbo = await builder.buildUnsigned(new SelfTransferMemo(), payer, 5000, { turbo: true });
+  assert.equal(turbo.blockhashSource, "stream");
+  assert.equal(turbo.blockhash, HASH);
+  assert.equal(rpc.calls, 1); // no extra RPC on the turbo path
 });
 
 test("submit falls back to RPC when the cache is cold", async () => {

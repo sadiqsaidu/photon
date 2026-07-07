@@ -1,11 +1,12 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useStore } from "@/lib/store";
+import { useLeaders } from "./leaders-context";
 
 const CELLS = 28;
-const WINDOW = 4;
 
-function short(id: string | null): string {
+function short(id: string | null | undefined): string {
   if (!id) return "—";
   return id.length > 10 ? `${id.slice(0, 4)}…${id.slice(-4)}` : id;
 }
@@ -14,19 +15,20 @@ function short(id: string | null): string {
 // sliding toward "now". Green pulse = window open, fire now.
 export function LeaderStrip() {
   const { state } = useStore();
+  const { leaders, next } = useLeaders();
   const n = state.network;
+  const [, force] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => force((x) => x + 1), 500);
+    return () => clearInterval(id);
+  }, []);
 
-  // freshest anchor for the countdown: leader transition or last policy tick
-  const anchors = [
-    state.leader ? { s: state.leader.slotsToLeader, at: state.leader.atSlot } : null,
-    state.tipPolicy ? { s: state.tipPolicy.slotsToLeader, at: state.tipPolicy.atSlot } : null,
-  ].filter((a): a is { s: number; at: number } => a !== null && a.s >= 0);
-  const anchor = anchors.sort((a, b) => b.at - a.at)[0] ?? null;
-  const raw = anchor ? anchor.s - (state.slot - anchor.at) : null;
-  // window fully passed and no fresh anchor yet -> unknown, not a negative count
-  const stale = raw === null || raw <= -WINDOW;
-  const open = !stale && raw !== null && raw <= 0;
-  const remaining = stale ? null : raw;
+  const liveSlot = Math.max(state.slot, leaders?.currentSlot ?? 0);
+  const w = leaders?.windows.find((x) => x.end >= liveSlot) ?? null;
+  const remaining = w ? w.start - liveSlot : null;
+  const open = Boolean(next?.open || (remaining !== null && remaining <= 0));
+  const windowLen = w ? w.end - w.start + 1 : 4;
+  const etaS = remaining !== null && remaining > 0 ? ((remaining * (leaders?.slotMs || 400)) / 1000).toFixed(1) : null;
 
   return (
     <div className="panel p-4">
@@ -37,27 +39,20 @@ export function LeaderStrip() {
           {remaining === null ? "—" : open ? "OPEN" : remaining}
         </span>
         <span className="text-[11px] text-bone-faint">
-          {open ? "fire now" : remaining === null ? "awaiting anchor" : "slots to leader"}
+          {open ? "fire now" : remaining === null ? "deriving…" : `slots · ~${etaS}s`}
         </span>
       </div>
 
       {/* slot rail */}
       <div className={`mt-4 flex h-6 items-stretch gap-px ${open ? "window-open" : ""}`}>
         {Array.from({ length: CELLS }, (_, i) => {
-          const inWindow =
-            remaining !== null && i >= Math.max(0, remaining) && i < Math.max(0, remaining) + WINDOW;
+          const inWindow = remaining !== null && i >= Math.max(0, remaining) && i < Math.max(0, remaining) + windowLen;
           const isNow = i === 0;
           return (
             <span
               key={i}
               className={`flex-1 transition-colors duration-300 ${
-                isNow && open
-                  ? "bg-moss"
-                  : isNow
-                    ? "bg-bone-dim"
-                    : inWindow
-                      ? "bg-gilt"
-                      : "bg-line"
+                isNow && open ? "bg-moss" : isNow ? "bg-bone-dim" : inWindow ? "bg-gilt" : "bg-line"
               }`}
               style={{ opacity: inWindow || isNow ? 1 : Math.max(0.25, 1 - i * 0.03) }}
             />
@@ -73,23 +68,14 @@ export function LeaderStrip() {
         <div className="flex items-center justify-between">
           <span className="text-bone-faint">current leader</span>
           <span className="flex items-center gap-1.5 tabular-nums text-bone-dim">
-            {short(n?.leader ?? null)}
+            {short(n?.leader)}
             {n?.leaderIsJito && <span className="tag-gilt">jito</span>}
           </span>
         </div>
         <div className="flex items-center justify-between">
-          <span className="text-bone-faint">next leader</span>
-          <span className="flex items-center gap-1.5 tabular-nums text-bone-dim">
-            {short(n?.nextLeader ?? null)}
-            {n?.nextIsJito && <span className="tag-gilt">jito</span>}
-          </span>
+          <span className="text-bone-faint">targeted window</span>
+          <span className="tabular-nums text-bone-dim">{short(w?.identity)}</span>
         </div>
-        {state.leader?.leaderIdentity && (
-          <div className="flex items-center justify-between">
-            <span className="text-bone-faint">targeted</span>
-            <span className="tabular-nums text-bone-dim">{short(state.leader.leaderIdentity)}</span>
-          </div>
-        )}
       </div>
     </div>
   );

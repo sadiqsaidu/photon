@@ -50,12 +50,24 @@ export class SolanaRpc implements RpcGateway {
     return s && s.samplePeriodSecs > 0 ? Math.round(s.numTransactions / s.samplePeriodSecs) : 0;
   }
 
-  async voteAccounts(): Promise<{ nodePubkey: string; votePubkey: string }[]> {
-    const r = await call<{ current: { nodePubkey: string; votePubkey: string }[] }>(
-      this.url,
-      "getVoteAccounts",
-      [{ commitment: "confirmed" }],
-    );
+  async voteAccounts(): Promise<
+    { nodePubkey: string; votePubkey: string; activatedStake: number; commission: number }[]
+  > {
+    const r = await call<{
+      current: { nodePubkey: string; votePubkey: string; activatedStake: number; commission: number }[];
+    }>(this.url, "getVoteAccounts", [{ commitment: "confirmed" }]);
     return r.current;
+  }
+
+  // Preflight: execute the signed tx against the tip of the chain without
+  // broadcasting. replaceRecentBlockhash avoids false negatives when the tx
+  // was signed against a hash fresher than this node has seen.
+  async simulate(base64Tx: string): Promise<{ err: unknown; logs: string[]; unitsConsumed: number | null }> {
+    const r = await call<{ value: { err: unknown; logs: string[] | null; unitsConsumed?: number } }>(
+      this.url,
+      "simulateTransaction",
+      [base64Tx, { encoding: "base64", sigVerify: false, replaceRecentBlockhash: true, commitment: "processed" }],
+    );
+    return { err: r.value.err ?? null, logs: r.value.logs ?? [], unitsConsumed: r.value.unitsConsumed ?? null };
   }
 }

@@ -23,12 +23,18 @@ import { createApi } from "./api/server.js";
 import { makeDb } from "./db/index.js";
 import { Store } from "./db/store.js";
 import { info, warn } from "./shared/log.js";
-import { JITO_TIP_ACCOUNTS } from "./core/constants.js";
+import { JITO_TIP_ACCOUNTS, SLOT_MS } from "./core/constants.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function makeLlm(cfg: Config): { client: LlmClient; model: string } {
-  if (cfg.openrouterKey) return { client: new OpenRouter(cfg.openrouterKey), model: cfg.openrouterModel };
+  if (cfg.openrouterKey) {
+    const [primary, ...fallbacks] = cfg.openrouterModels;
+    return {
+      client: new OpenRouter(cfg.openrouterKey, fallbacks),
+      model: primary ?? "meta-llama/llama-3.3-70b-instruct:free",
+    };
+  }
   if (cfg.geminiKey) return { client: new Gemini(cfg.geminiKey), model: cfg.geminiModel };
   throw new Error("set OPENROUTER_API_KEY or GEMINI_API_KEY");
 }
@@ -72,6 +78,17 @@ function checkTipAccounts(jito: JitoMulti): void {
     .catch((e: unknown) => warn("jito", "tip account cross-check failed", String(e)));
 }
 
+// Boot must never depend on Jito being reachable: the 8 tip accounts are
+// static and hardcoded, so a block-engine timeout falls back to them.
+async function tipAccountsOrDefault(jito: JitoMulti): Promise<string[]> {
+  try {
+    return await jito.tipAccounts();
+  } catch (e) {
+    warn("jito", "tipAccounts unavailable at boot, using hardcoded set", String(e));
+    return [...JITO_TIP_ACCOUNTS];
+  }
+}
+
 function stack(cfg: Config) {
   const rpc = new SolanaRpc(cfg.rpcUrl);
   const jito = new JitoMulti(cfg.jitoEngines.map((u) => new JitoEngine(u)));
@@ -86,12 +103,29 @@ function stack(cfg: Config) {
   tipStream.onSlotP50 = (_slot, p50) => forecaster.observe(p50);
   const oracle = new TipOracle(tipStream);
   const monitor = new NetworkMonitor(rpc, oracle);
-  const leader = new LeaderWindow(jito, rpc, (id) => monitor.isJito(id));
+  const leader = new LeaderWindow(rpc, (id) => monitor.isJito(id));
   const blockhash = new BlockhashCache();
   const llm = makeLlm(cfg);
   const agent = new Agent(llm.client, llm.model, cfg.tipCeiling);
   const worker = new Worker(stream, jito, oracle, leader, agent, store, cfg.tipCeiling, blockhash, tipStream, forecaster);
   return { rpc, jito, store, oracle, agent, worker, monitor, leader, blockhash, stream };
+}
+
+// What the deck's Jito-windows table renders: the next windows from the local
+// schedule, enriched with validator metadata from the Kobe set.
+function leadersPayload(s: Stack) {
+  const status = s.leader.status();
+  return {
+    currentSlot: s.leader.currentSlot(),
+    windowOpen: status.open,
+    slotsToLeader: status.slotsToLeader,
+    slotMs: SLOT_MS,
+    windows: s.leader.upcomingWindows(10).map((w) => ({
+      ...w,
+      etaMs: Math.max(0, w.slotsAway) * SLOT_MS,
+      validator: s.monitor.info(w.identity),
+    })),
+  };
 }
 
 type Stack = ReturnType<typeof stack>;
@@ -107,6 +141,7 @@ function onShutdown(s: Stack, api?: import("node:http").Server): void {
     info("main", "shutting down");
     s.worker.close();
     s.monitor.close();
+    s.jito.close();
     api?.closeAllConnections?.();
     api?.close();
     void s.stream.close().finally(() => process.exit(0));
@@ -131,7 +166,7 @@ async function submitMode(cfg: Config, variant: SubmitVariant): Promise<void> {
   if (!cfg.walletSecret) throw new Error("set WALLET_SECRET (throwaway) to run submit/fault/fault2");
   const s = stack(cfg);
   const signer = signerFromSecret(cfg.walletSecret);
-  const builder = new BundleBuilder(s.rpc, await s.jito.tipAccounts(), s.blockhash);
+  const builder = new BundleBuilder(s.rpc, await tipAccountsOrDefault(s.jito), s.blockhash);
   const submitter = new Submitter(builder, s.jito, signer, s.agent, s.oracle, s.store, s.worker, s.blockhash, s.leader);
   s.worker.onSubmittedFailure = (l) => submitter.onFailure(l);
   s.worker.start();
@@ -158,14 +193,22 @@ async function submitMode(cfg: Config, variant: SubmitVariant): Promise<void> {
 
 async function serve(cfg: Config): Promise<void> {
   const s = stack(cfg);
-  const builder = new BundleBuilder(s.rpc, await s.jito.tipAccounts(), s.blockhash);
+  const builder = new BundleBuilder(s.rpc, await tipAccountsOrDefault(s.jito), s.blockhash);
   const signer = cfg.walletSecret ? signerFromSecret(cfg.walletSecret) : undefined;
   const submitter = new Submitter(builder, s.jito, signer, s.agent, s.oracle, s.store, s.worker, s.blockhash, s.leader);
   s.worker.onSubmittedFailure = (l) => submitter.onFailure(l);
   s.worker.start();
   s.monitor.start();
 
-  const api = createApi({ builder, submitter, defaultTip: () => s.worker.tip().tip, hasSigner: Boolean(signer) });
+  const api = createApi({
+    builder,
+    submitter,
+    defaultTip: () => s.worker.tip().tip,
+    hasSigner: Boolean(signer),
+    leaders: () => leadersPayload(s),
+    engines: () => s.jito.latencies(),
+    simulate: (b64) => s.rpc.simulate(b64),
+  });
   api.listen(cfg.port, () => info("api", "listening", { port: cfg.port, watch: cfg.watchAccount }));
   onShutdown(s, api);
 }
@@ -173,7 +216,7 @@ async function serve(cfg: Config): Promise<void> {
 async function construct(cfg: Config): Promise<void> {
   if (!cfg.walletPubkey) throw new Error("set WALLET_PUBKEY to build an unsigned bundle");
   const jito = new JitoMulti(cfg.jitoEngines.map((u) => new JitoEngine(u)));
-  const builder = new BundleBuilder(new SolanaRpc(cfg.rpcUrl), await jito.tipAccounts());
+  const builder = new BundleBuilder(new SolanaRpc(cfg.rpcUrl), await tipAccountsOrDefault(jito));
   const unsigned = await builder.buildUnsigned(new SelfTransferMemo(), new PublicKey(cfg.walletPubkey), 10_000);
   info("construct", "unsigned bundle ready (sign client-side)", unsigned);
 }

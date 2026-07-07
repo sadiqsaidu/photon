@@ -4,15 +4,42 @@ import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { VersionedMessage, VersionedTransaction } from "@solana/web3.js";
 import bs58 from "bs58";
-import { prepareBundle, submitBundle } from "@/lib/api";
+import { prepareBundle, simulateTx, submitBundle } from "@/lib/api";
 import { useStore } from "@/lib/store";
+import { useLeaders } from "./leaders-context";
 import { base64ToBytes, bytesToBase64, sol } from "@/lib/format";
 
 type Mode = "transfer" | "raw";
 
+function Toggle({
+  on,
+  set,
+  label,
+  hint,
+}: {
+  on: boolean;
+  set: (v: boolean) => void;
+  label: string;
+  hint: string;
+}) {
+  return (
+    <button onClick={() => set(!on)} className="flex w-full items-center justify-between py-1 text-left" title={hint}>
+      <span className="text-[10px] uppercase tracking-widest text-bone-faint">{label}</span>
+      <span
+        className={`relative h-3.5 w-7 border transition-colors ${on ? "border-gilt bg-gilt-deep" : "border-line bg-coal"}`}
+      >
+        <span
+          className={`absolute top-0.5 h-2 w-2 transition-all ${on ? "left-4 bg-gilt" : "left-0.5 bg-bone-ghost"}`}
+        />
+      </span>
+    </button>
+  );
+}
+
 export function BuildDock() {
   const { publicKey, signTransaction } = useWallet();
   const { state } = useStore();
+  const { next } = useLeaders();
   const suggested = state.tipPolicy?.tip ?? 10_000;
 
   const [mode, setMode] = useState<Mode>("transfer");
@@ -20,20 +47,37 @@ export function BuildDock() {
   const [amount, setAmount] = useState("0.001");
   const [tip, setTip] = useState(suggested);
   const [raw, setRaw] = useState("");
+  const [turbo, setTurbo] = useState(true);
+  const [preflight, setPreflight] = useState(true);
   const [status, setStatus] = useState("");
+
+  const open = next?.open ?? false;
+  const etaS = next && !open ? (next.etaMs / 1000).toFixed(1) : null;
 
   async function submitTransfer() {
     if (!publicKey || !signTransaction) return setStatus("connect a wallet first");
     try {
       const lamports = Math.round(parseFloat(amount) * 1e9);
-      setStatus("preparing…");
-      const prep = await prepareBundle(publicKey.toBase58(), tip, { kind: "sol_transfer", to, lamports });
+      setStatus(turbo ? "preparing · turbo blockhash…" : "preparing…");
+      const prep = await prepareBundle(publicKey.toBase58(), tip, { kind: "sol_transfer", to, lamports }, turbo);
       const tx = new VersionedTransaction(VersionedMessage.deserialize(base64ToBytes(prep.messageBase64)));
-      setStatus("awaiting signature…");
+      setStatus(`awaiting signature… (${prep.blockhashSource} hash)`);
       const signed = await signTransaction(tx);
       const signature = bs58.encode(signed.signatures[0]);
+      const signedB64 = bytesToBase64(signed.serialize());
+
+      if (preflight) {
+        setStatus("preflight simulation…");
+        const sim = await simulateTx(signedB64);
+        if (sim.err) {
+          const tail = sim.logs.slice(-2).join(" · ");
+          setStatus(`✕ preflight failed — not submitted, no tip at risk. ${JSON.stringify(sim.err)} ${tail}`);
+          return;
+        }
+      }
+
       setStatus("submitting…");
-      const res = await submitBundle([bytesToBase64(signed.serialize())], signature, prep.tip);
+      const res = await submitBundle([signedB64], signature, prep.tip);
       setStatus(res.bundleId ? `submitted · ${res.bundleId.slice(0, 10)}…` : "submitted");
     } catch (e) {
       setStatus(`error · ${String(e)}`);
@@ -92,6 +136,20 @@ export function BuildDock() {
           >
             ↳ take the mind&apos;s tip · {sol(suggested)}
           </button>
+          <div className="border-t border-line pt-2">
+            <Toggle
+              on={turbo}
+              set={setTurbo}
+              label={`turbo blockhash · ${turbo ? "stream tip" : "rpc confirmed"}`}
+              hint="turbo signs against the freshest streamed block (fastest, slight fork risk); off = RPC confirmed (safe)"
+            />
+            <Toggle
+              on={preflight}
+              set={setPreflight}
+              label={`preflight sim · ${preflight ? "on" : "off"}`}
+              hint="simulate before firing: a bundle that would fail on-chain is caught before you risk a tip"
+            />
+          </div>
         </div>
       ) : (
         <textarea
@@ -103,11 +161,25 @@ export function BuildDock() {
         />
       )}
 
+      {/* fire timing: counts down to the next Jito window */}
+      <div
+        className={`mt-3 flex items-center justify-between border px-2.5 py-1.5 text-[10px] uppercase tracking-widest ${
+          open ? "window-open border-moss-dim bg-moss-deep text-moss" : "border-line text-bone-faint"
+        }`}
+      >
+        <span>{open ? "jito window open" : "next jito window"}</span>
+        <span className="tabular-nums">{open ? "fire now" : etaS !== null ? `~${etaS}s` : "—"}</span>
+      </div>
+
       <button
         onClick={mode === "transfer" ? submitTransfer : submitRaw}
-        className="mt-3 w-full border border-ember-dim bg-ember-deep px-3 py-2.5 text-[12px] font-bold uppercase tracking-widest text-ember transition-colors hover:border-ember hover:bg-ember/15"
+        className={`mt-2 w-full border px-3 py-2.5 text-[12px] font-bold uppercase tracking-widest transition-colors ${
+          open
+            ? "window-open border-moss bg-moss-deep text-moss hover:bg-moss/20"
+            : "border-ember-dim bg-ember-deep text-ember hover:border-ember hover:bg-ember/15"
+        }`}
       >
-        {publicKey || mode === "raw" ? "fire bundle" : "connect wallet"}
+        {publicKey || mode === "raw" ? (open ? "fire bundle — window open" : "fire bundle") : "connect wallet"}
       </button>
       {status && <div className="mt-2 break-all text-[10px] tabular-nums text-bone-faint">{status}</div>}
     </div>

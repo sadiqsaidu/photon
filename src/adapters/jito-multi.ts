@@ -14,21 +14,82 @@ export const DEFAULT_JITO_ENGINES = [
   "https://london.mainnet.block-engine.jito.wtf",
 ];
 
+const PROBE_MS = 30_000;
+const PROBE_TIMEOUT_MS = 2500;
+
+export interface EngineHealth {
+  engine: string;
+  region: string;
+  rttMs: number | null;
+  ok: boolean;
+  coolingDown: boolean;
+  at: number;
+}
+
+function region(url: string): string {
+  try {
+    return new URL(url).hostname.split(".")[0] ?? url;
+  } catch {
+    return url;
+  }
+}
+
 // Multi-region fan-out: every call races all (non-cooling) engines and the
 // first success wins. Duplicate submission is safe — identical signatures
-// land at most once.
+// land at most once. A background probe measures per-region RTT.
 export class JitoMulti implements BundleGateway {
   private readonly coolUntil = new Map<string, number>();
+  private readonly rtt = new Map<string, { rttMs: number | null; ok: boolean; at: number }>();
+  private probeTimer: NodeJS.Timeout | null = null;
 
   constructor(private readonly engines: JitoEngine[]) {
     if (engines.length === 0) throw new Error("JitoMulti needs at least one engine");
+    void this.probe();
+    this.probeTimer = setInterval(() => void this.probe(), PROBE_MS);
+    this.probeTimer.unref?.();
+  }
+
+  close(): void {
+    if (this.probeTimer) clearInterval(this.probeTimer);
+    this.probeTimer = null;
+  }
+
+  latencies(): EngineHealth[] {
+    const now = Date.now();
+    return this.engines.map((e) => {
+      const r = this.rtt.get(e.engine);
+      return {
+        engine: e.engine,
+        region: region(e.engine),
+        rttMs: r?.rttMs ?? null,
+        ok: r?.ok ?? false,
+        coolingDown: (this.coolUntil.get(e.engine) ?? 0) > now,
+        at: r?.at ?? 0,
+      };
+    });
+  }
+
+  private async probe(): Promise<void> {
+    await Promise.all(
+      this.engines.map(async (e) => {
+        const t0 = Date.now();
+        try {
+          await e.tipAccounts(AbortSignal.timeout(PROBE_TIMEOUT_MS));
+          this.rtt.set(e.engine, { rttMs: Date.now() - t0, ok: true, at: Date.now() });
+        } catch {
+          this.rtt.set(e.engine, { rttMs: null, ok: false, at: Date.now() });
+        }
+      }),
+    );
   }
 
   private available(): JitoEngine[] {
     const now = Date.now();
     const ok = this.engines.filter((e) => (this.coolUntil.get(e.engine) ?? 0) <= now);
     // If every engine is cooling down, trying them all beats guaranteed failure.
-    return ok.length > 0 ? ok : this.engines;
+    const pool = ok.length > 0 ? ok : [...this.engines];
+    // fastest region first (ties/unknowns keep config order)
+    return pool.sort((a, b) => (this.rtt.get(a.engine)?.rttMs ?? Infinity) - (this.rtt.get(b.engine)?.rttMs ?? Infinity));
   }
 
   private markRejected(engine: JitoEngine, e: unknown): Error {

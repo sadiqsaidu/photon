@@ -15,3 +15,6 @@ export const JITO_TIP_ACCOUNTS: readonly string[] = [
 
 // A blockhash stays valid for 150 blocks after the block that produced it.
 export const BLOCKHASH_VALID_BLOCKS = 150;
+
+// Nominal slot duration, used for countdown ETAs.
+export const SLOT_MS = 400;

@@ -1,6 +1,7 @@
 "use client";
 
 import { recentLifecycles, useStore } from "@/lib/store";
+import { useLeaders } from "./leaders-context";
 import { ms } from "@/lib/format";
 
 function Row({ k, v, tone }: { k: string; v: string; tone?: "moss" | "ember" }) {
@@ -17,6 +18,7 @@ function Row({ k, v, tone }: { k: string; v: string; tone?: "moss" | "ember" }) 
 // Vitals: the numbers an operator glances at when something feels off.
 export function SystemPanel() {
   const { state } = useStore();
+  const { engines } = useLeaders();
   const tracked = recentLifecycles(state).length;
   const race = state.race;
   const reconnects = race ? race.providers.reduce((a, p) => a + p.reconnects, 0) : 0;
@@ -43,6 +45,24 @@ export function SystemPanel() {
           />
         ))}
       </div>
+      {engines.length > 0 && (
+        <>
+          <div className="label mb-2 mt-4">jito engines · rtt</div>
+          <div className="space-y-1.5">
+            {engines.map((e) => (
+              <Row
+                key={e.engine}
+                k={e.region + (e.coolingDown ? " · cooling" : "")}
+                v={e.rttMs !== null ? `${e.rttMs}ms` : "down"}
+                tone={e.rttMs === null ? "ember" : e.rttMs < 150 ? "moss" : undefined}
+              />
+            ))}
+            <p className="pt-1 text-[9px] leading-relaxed text-bone-ghost">
+              sendBundle fans out fastest-region first
+            </p>
+          </div>
+        </>
+      )}
     </div>
   );
 }

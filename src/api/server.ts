@@ -16,6 +16,10 @@ export interface ApiDeps {
   submitter: Submitter;
   defaultTip: () => number;
   hasSigner: boolean;
+  // searcher intel: upcoming Jito windows + engine latency + preflight sim
+  leaders: () => unknown;
+  engines: () => unknown;
+  simulate: (base64Tx: string) => Promise<unknown>;
 }
 
 function send(res: ServerResponse, status: number, body: unknown): void {
@@ -71,6 +75,14 @@ export function createApi(deps: ApiDeps): Server {
         sse(res);
         return;
       }
+      if (req.method === "GET" && url.pathname === "/leaders") {
+        send(res, 200, deps.leaders());
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/engines") {
+        send(res, 200, deps.engines());
+        return;
+      }
       if (req.method === "POST" && url.pathname === "/bundle/prepare") {
         const body = await readJson(req);
         if (typeof body.payer !== "string") {
@@ -78,8 +90,19 @@ export function createApi(deps: ApiDeps): Server {
           return;
         }
         const tip = typeof body.tip === "number" ? body.tip : deps.defaultTip();
-        const unsigned = await deps.builder.buildUnsigned(payloadFrom(body.payload), new PublicKey(body.payer), tip);
+        const unsigned = await deps.builder.buildUnsigned(payloadFrom(body.payload), new PublicKey(body.payer), tip, {
+          turbo: body.turbo === true,
+        });
         send(res, 200, unsigned);
+        return;
+      }
+      if (req.method === "POST" && url.pathname === "/bundle/simulate") {
+        const body = await readJson(req);
+        if (typeof body.signedTx !== "string") {
+          send(res, 400, { error: "signedTx (base64) required" });
+          return;
+        }
+        send(res, 200, await deps.simulate(body.signedTx));
         return;
       }
       if (req.method === "POST" && url.pathname === "/bundle/submit") {

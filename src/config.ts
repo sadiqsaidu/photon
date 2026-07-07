@@ -11,7 +11,7 @@ export interface Config {
   geminiKey: string | undefined;
   geminiModel: string;
   openrouterKey: string | undefined;
-  openrouterModel: string;
+  openrouterModels: string[];
   watchAccount: string;
   walletPubkey: string | undefined;
   walletSecret: string | undefined;
@@ -40,7 +40,11 @@ export function loadConfig(): Config {
     geminiKey: process.env.GEMINI_API_KEY,
     geminiModel: process.env.GEMINI_MODEL ?? "gemini-2.0-flash",
     openrouterKey: process.env.OPENROUTER_API_KEY,
-    openrouterModel: process.env.OPENROUTER_MODEL ?? "meta-llama/llama-3.3-70b-instruct:free",
+    // comma-separated fallback chain; first entry is the primary
+    openrouterModels: (process.env.OPENROUTER_MODEL ?? "meta-llama/llama-3.3-70b-instruct:free")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
     watchAccount: req("WATCH_ACCOUNT"),
     walletPubkey: process.env.WALLET_PUBKEY,
     walletSecret: process.env.WALLET_SECRET,

@@ -17,6 +17,8 @@ export class Worker implements SubmitContext {
   private readonly tracker: LifecycleTracker;
   private policy: TipPolicy | null = null;
   private policyTimer: NodeJS.Timeout | null = null;
+  private policyFailures = 0;
+  private lastPolicyError = "";
   onSubmittedFailure?: (l: Lifecycle) => Promise<void>;
 
   constructor(
@@ -154,8 +156,17 @@ export class Worker implements SubmitContext {
         multiplier: this.policy.multiplier,
         reasoning: this.policy.trace.reasoning,
       });
+      if (this.policyFailures > 0) info("agent", "policy refresh recovered", { after: this.policyFailures });
+      this.policyFailures = 0;
+      this.lastPolicyError = "";
     } catch (e) {
-      warn("agent", "policy refresh failed", String(e));
+      // Free-tier LLMs flake constantly; warn on state changes, not every 20s.
+      const msg = String(e);
+      this.policyFailures++;
+      if (msg !== this.lastPolicyError || this.policyFailures % 10 === 1) {
+        warn("agent", "policy refresh failed", { consecutive: this.policyFailures, error: msg });
+      }
+      this.lastPolicyError = msg;
     }
   }
 
