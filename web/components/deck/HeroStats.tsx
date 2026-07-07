@@ -1,6 +1,6 @@
 "use client";
 
-import { bundleCounts, useStore } from "@/lib/store";
+import { bundleCounts, useStore, yourBundles } from "@/lib/store";
 import { sol } from "@/lib/format";
 
 function Tile({
@@ -42,6 +42,17 @@ export function HeroStats() {
   const race = state.race;
   const two = race && race.providers.length >= 2;
   const totalWins = race ? race.providers.reduce((a, b) => a + b.wins, 0) : 0;
+
+  // Session tip economics. Bundles are atomic: a failed bundle never pays its
+  // tip, so "spent" counts landed bundles only and in-flight tips are exposure.
+  let spent = 0;
+  let exposure = 0;
+  for (const l of yourBundles(state)) {
+    if (l.failure) continue;
+    if (l.stages.finalized) spent += l.tip;
+    else exposure += l.tip;
+  }
+  const avgTip = counts.landed > 0 ? spent / counts.landed : null;
 
   return (
     <div className="flex h-full flex-col gap-px">
@@ -108,6 +119,21 @@ export function HeroStats() {
           {trend === null ? "—" : `${rising ? "▲" : falling ? "▼" : "◆"} ${Math.abs(trend).toFixed(1)}%`}
         </div>
         <div className="mt-1.5 text-[11px] text-bone-faint">per 10 slots · holt(0.3/0.1)</div>
+      </Tile>
+
+      <Tile
+        label="tip spend · session"
+        foot={
+          <>
+            <span className="tag-ghost">{avgTip !== null ? `${sol(Math.round(avgTip))} avg / landed` : "no fills yet"}</span>
+            {exposure > 0 && <span className="tag-gilt">{sol(exposure)} in flight</span>}
+          </>
+        }
+      >
+        <div className="hero-num text-[30px] leading-none">{sol(spent)}</div>
+        <div className="mt-1.5 text-[11px] text-bone-faint">
+          SOL paid in tips · failed bundles pay nothing
+        </div>
       </Tile>
 
       <Tile label="stream race · first event wins">

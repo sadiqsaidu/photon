@@ -76,7 +76,7 @@ npm test
 | `GRPC_TOKEN_2` | — | Auth token for the second gRPC endpoint. |
 | `JITO_ENGINES` | — | Comma-separated Jito Block Engine base URLs (default Frankfurt+Amsterdam+London). `sendBundle` fans out to all of them. `JITO_ENGINE` (single) is still honored. |
 | `OPENROUTER_API_KEY` | yes* | OpenRouter key. If set, OpenRouter is used for the agent. |
-| `OPENROUTER_MODEL` | — | Model id (default `meta-llama/llama-3.3-70b-instruct:free`; any `:free` model works). |
+| `OPENROUTER_MODEL` | — | Comma-separated model fallback chain (default `meta-llama/llama-3.3-70b-instruct:free`). Each model gets two tries before the next takes over — free tiers flake. |
 | `GEMINI_API_KEY` | yes* | Gemini key. Used only if `OPENROUTER_API_KEY` is empty. |
 | `GEMINI_MODEL` | — | Model id (default `gemini-2.0-flash`). |
 
@@ -136,17 +136,23 @@ cp .env.example .env.local   # NEXT_PUBLIC_API_BASE (default http://localhost:80
 npm run dev                  # http://localhost:3000  (expects the backend in serve mode)
 ```
 
-The dashboard is a terminal-style "signal deck": a rolling slot odometer and
-epoch hairline up top; hero numerals (AI tip, land rate, forecast trend, stream
-race) on the left; the live **tip surface** in the middle — crimson tip floor,
-amber agent tip steps, dashed Holt forecast past the "now" line, with every
-policy decision pinned to the chart as a hoverable node; **tracers** below it
-animate each bundle through submitted → processed → confirmed → finalized, and
-a failed lane grows the agent's recovery verdict in place; the Jito leader
-window slides toward "now" on the right; and the agent's reasoning types out
-live in the stdout bar at the bottom. Connect a wallet to submit: the frontend
-calls `/bundle/prepare`, the wallet signs, and the frontend posts the signed
-transaction to `/bundle/submit`.
+The dashboard is a terminal-style "signal deck", built strictly for the
+searcher (no third-party transaction noise): a rolling slot odometer and epoch
+hairline up top; hero numerals on the left (AI tip, land rate, forecast trend,
+session tip spend, stream race); the live **tip surface** in the middle —
+crimson tip floor, amber agent tip steps, dashed Holt forecast past the "now"
+line, with every policy decision pinned to the chart as a hoverable node; the
+**Jito windows table** below it — the next 10 leader windows counting down
+live, each row clickable for the validator behind it (stake, commission, MEV
+fee, explorer links); **your bundles** lanes animate your own submissions
+through submitted → processed → confirmed → finalized, with the agent's
+recovery verdict growing out of a failed lane; and the launch dock carries
+**turbo mode** (streamed tip-of-chain blockhash vs safe RPC confirmed),
+**preflight simulation**, and a **fire-timing countdown** that pulses green
+when the Jito window is open. The agent's reasoning types out live in the
+stdout bar at the bottom. Connect a wallet to submit: the frontend calls
+`/bundle/prepare`, the wallet signs, preflight simulates, and the signed
+transaction posts to `/bundle/submit`.
 
 ### API reference (serve mode)
 
@@ -154,9 +160,18 @@ transaction to `/bundle/submit`.
 |---|---|---|
 | GET | `/health` | Liveness + whether a server signer is present |
 | GET | `/events` | SSE firehose: `slot`, `lifecycle`, `tip_policy`, `agent`, `stream`, `stream_race`, `leader`, `network` |
-| POST | `/bundle/prepare` | `{ payer, tip? }` → unsigned bundle for the wallet to sign |
+| GET | `/leaders` | The next 10 Jito leader windows (slot range, ETA, validator identity/stake/MEV commission), derived locally |
+| GET | `/engines` | Per-region block-engine RTT from the background probe |
+| POST | `/bundle/prepare` | `{ payer, tip?, turbo? }` → unsigned bundle. `turbo: true` signs against the freshest streamed tip-of-chain blockhash; default is RPC `confirmed` (safe) |
+| POST | `/bundle/simulate` | `{ signedTx }` → preflight `simulateTransaction`; a bundle that would fail on-chain is caught before a tip is risked |
 | POST | `/bundle/submit` | `{ signedTx, signature, tip }` → submits to Jito and tracks it |
 | POST | `/fault` | Inject a blockhash-expiry failure (local-signer demo only) |
+
+Note on the leader schedule: `getNextScheduledLeader` exists only on Jito's
+gRPC searcher API (the HTTP block engines 404 it), so Photon derives every
+upcoming Jito window locally — `getSlotLeaders` × the Kobe validator set —
+which is faster, free, and gives the full firing schedule instead of one
+anchor.
 
 ---
 

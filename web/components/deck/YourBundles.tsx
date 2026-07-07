@@ -40,10 +40,7 @@ function Lane({ l, recovery, now }: { l: Lifecycle; recovery: AgentEntry | undef
     <div className="rise-in group relative px-4 py-2.5">
       <div className="mb-1.5 flex items-baseline justify-between text-[10px]">
         <span className="flex items-baseline gap-2">
-          <span className={l.source === "submitted" ? "text-bone" : "text-bone-faint"}>
-            {shortSig(l.signature)}
-          </span>
-          {l.source === "submitted" && <span className="tag-ghost">yours</span>}
+          <span className="text-bone">{shortSig(l.signature)}</span>
           {l.retryOf && <span className="text-bone-faint">↳ retry of {shortSig(l.retryOf)}</span>}
         </span>
         <span className="flex items-baseline gap-2 tabular-nums">
@@ -101,9 +98,10 @@ function Lane({ l, recovery, now }: { l: Lifecycle; recovery: AgentEntry | undef
   );
 }
 
-// Every tracked signature is a tracer flying toward finalization. Failures
-// stall in red and grow the agent's recovery verdict in place.
-export function Tracers() {
+// Strictly your own submissions — Photon is a searcher's cockpit, not a
+// network observer. Each bundle flies toward finalization; failures stall in
+// red and grow the agent's recovery verdict in place.
+export function YourBundles() {
   const { state } = useStore();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -111,25 +109,24 @@ export function Tracers() {
     return () => clearInterval(id);
   }, []);
 
-  const all = recentLifecycles(state);
-  const yours = all.filter((l) => l.source === "submitted").slice(0, 6);
-  const observed = all.filter((l) => l.source === "observed").slice(0, Math.max(2, 8 - yours.length));
-  const lanes = [...yours, ...observed];
+  const lanes = recentLifecycles(state)
+    .filter((l) => l.source === "submitted")
+    .slice(0, 8);
   const recoveryBySig = new Map<string, AgentEntry>();
   for (const a of state.agent) {
     if (a.kind === "recovery" && !recoveryBySig.has(a.signature)) recoveryBySig.set(a.signature, a);
   }
 
   return (
-    <div className="panel flex-1">
+    <div className="panel">
       <div className="flex items-center justify-between px-4 pt-3">
-        <span className="label">tracers · submitted → processed → confirmed → finalized</span>
-        <span className="text-[10px] tabular-nums text-bone-faint">{all.length} tracked</span>
+        <span className="label">your bundles · submitted → processed → confirmed → finalized</span>
+        <span className="text-[10px] tabular-nums text-bone-faint">{lanes.length} this session</span>
       </div>
       <div className="mt-1 divide-y divide-line/60">
         {lanes.length === 0 ? (
           <div className="px-4 py-8 text-center text-[11px] text-bone-ghost">
-            no tracers yet — the stream will populate this, or submit a bundle
+            nothing fired yet — build a bundle in the launch dock
           </div>
         ) : (
           lanes.map((l) => <Lane key={l.signature} l={l} recovery={recoveryBySig.get(l.signature)} now={now} />)
