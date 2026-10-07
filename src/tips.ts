@@ -1,5 +1,6 @@
 import {
   BEAM_MIN_SAMPLES,
+  BEAM_MIN_TIP,
   bus,
   HEAT_MULT_MAX,
   HEAT_MULT_MIN,
@@ -38,15 +39,24 @@ export function percentile(sorted: number[], p: number): number {
   return sorted[i] as number;
 }
 
-export function rankOf(sorted: number[], value: number): number {
-  if (sorted.length === 0) return 50;
+const firstIndex = (sorted: number[], value: number, inclusive: boolean) => {
   let lo = 0, hi = sorted.length;
   while (lo < hi) {
     const mid = (lo + hi) >> 1;
-    if ((sorted[mid] as number) < value) lo = mid + 1;
+    const v = sorted[mid] as number;
+    if (v < value || (inclusive && v === value)) lo = mid + 1;
     else hi = mid;
   }
-  return (lo / sorted.length) * 100;
+  return lo;
+};
+
+// Mid-rank percentile: ties share the middle of their run, so a common exact
+// amount (100,000 lamports is one) does not collapse to the bottom.
+export function rankOf(sorted: number[], value: number): number {
+  if (sorted.length === 0) return 50;
+  const below = firstIndex(sorted, value, false);
+  const atOrBelow = firstIndex(sorted, value, true);
+  return ((below + atOrBelow) / 2 / sorted.length) * 100;
 }
 
 export function pearson(xs: number[], ys: number[]): number {
@@ -125,7 +135,7 @@ const f50 = holt();
 const f90 = holt();
 let lag: Lag = { k: 0, r: 0, n: 0, qualifies: false, beta: 0, computedAt: 0 };
 let lastConfirmed = 0;
-let sorted: { all: number[]; beam: number[] } = { all: [], beam: [] };
+let sorted: { all: number[]; beam: number[]; eligible: number[] } = { all: [], beam: [], eligible: [] };
 let leaderOf: (slot: number) => string | null = () => null;
 
 export function useLeaders(fn: (slot: number) => string | null): void {
@@ -181,7 +191,8 @@ export function onConfirmed(slot: number): SlotStats | null {
   prune();
   const all: number[] = [], beam: number[] = [];
   for (const list of samples.values()) for (const t of list) (t.source === "beam" ? beam : all).push(t.lamports);
-  sorted = { all: all.concat(beam).sort((a, b) => a - b), beam: beam.sort((a, b) => a - b) };
+  const combined = all.concat(beam).sort((a, b) => a - b);
+  sorted = { all: combined, beam: beam.sort((a, b) => a - b), eligible: combined.filter((v) => v >= BEAM_MIN_TIP) };
   bus.emit("tips", stats);
   return stats;
 }
@@ -199,8 +210,15 @@ export function refreshLag(): Lag {
   return lag;
 }
 
+// Quotes price inside the tips a Beam send could actually pay: landed tips at
+// or above the Beam floor, from Beam itself once it has enough samples.
 export function distribution(): { source: "beam" | "combined"; sorted: number[] } {
-  return sorted.beam.length >= BEAM_MIN_SAMPLES ? { source: "beam", sorted: sorted.beam } : { source: "combined", sorted: sorted.all };
+  return sorted.beam.length >= BEAM_MIN_SAMPLES ? { source: "beam", sorted: sorted.beam } : { source: "combined", sorted: sorted.eligible };
+}
+
+// Where the Beam floor sits among all landed tips (percentile, 0 to 100).
+export function floorPercentile(): number {
+  return Math.round(rankOf(sorted.all, BEAM_MIN_TIP) * 10) / 10;
 }
 
 export function heatMultiplier(): number {
@@ -231,7 +249,9 @@ export function tipState() {
     heatMultiplier: heatMultiplier(),
     source: d.source,
     samples: d.sorted.length,
+    allSamples: sorted.all.length,
     beamSamples: sorted.beam.length,
+    floorPercentile: floorPercentile(),
     forecast: Array.from({ length: 10 }, (_, i) => ({ h: i + 1, p50: forecastAt(50, i + 1), p90: forecastAt(90, i + 1) })),
   };
 }

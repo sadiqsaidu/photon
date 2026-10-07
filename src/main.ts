@@ -1,25 +1,35 @@
 import { blurCounts, startBlur } from "./blur.js";
-import { bus, LAG_INTERVAL_MS, requireApiKey } from "./config.js";
-import { checkDb, saveSlot } from "./db.js";
+import { bus, JITO_TIP_ACCOUNTS, LAG_INTERVAL_MS, requireApiKey } from "./config.js";
+import { checkDb, markLanded, probeRows, receiptBySignature, saveReceipt, saveSlot, type ProbeFields } from "./db.js";
 import { doctor } from "./doctor.js";
 import { startGrpc } from "./grpc.js";
+import * as lifecycle from "./lifecycle.js";
 import { raceSlot, raceStats, startMirage } from "./mirage.js";
+import { budgetState, loadProbes, probeOutcomes, probeRecords, probeSettled, startProbes } from "./probe.js";
+import { calibration, quote } from "./quote.js";
+import { HttpError, startServer } from "./server.js";
 import { beamTipAddresses, leaderNow } from "./solami.js";
-import type { StreamHealth } from "./stream.js";
 import { addHeat, addTip, finalizedRow, onConfirmed, refreshLag, tipState } from "./tips.js";
 
+const RECENT_RECEIPTS = 20;
 const STATUS_EVERY_MS = 60_000;
 
 async function serve(): Promise<void> {
   requireApiKey();
   await checkDb();
   const beamTips = await beamTipAddresses();
+  const beamSet = new Set(beamTips);
+  await loadProbes(await probeRows(), markLanded);
+  const startedAt = Date.now();
   let processed = 0;
   let chainTip = 0;
   let behind = 0;
+  const probeFields = new Map<string, ProbeFields>();
+  const recent: lifecycle.Receipt[] = [];
 
-  const grpc = startGrpc(beamTips, [], {
+  const grpc = startGrpc(beamTips, {
     onSlot(slot, status) {
+      lifecycle.onSlot(slot, status);
       if (status === "processed") {
         raceSlot("grpc", slot);
         if (slot > processed) {
@@ -33,12 +43,36 @@ async function serve(): Promise<void> {
         if (row) saveSlot(row).catch((e: Error) => console.error(`[db] slot ${slot}: ${e.message}`));
       }
     },
-    onBlock() {},
+    onBlock: lifecycle.onBlock,
     onTip: addTip,
-    onWatchedTx() {},
+    onTx: lifecycle.onTx,
   });
   const mirage = startMirage();
   const blur = startBlur(() => processed, addHeat);
+  const streams = () => [grpc, mirage, blur].map((s) => ({ ...s }));
+
+  bus.on("lifecycle", (r: lifecycle.Receipt) => {
+    const i = recent.findIndex((x) => x.signature === r.signature);
+    if (i >= 0) recent.splice(i, 1);
+    recent.unshift(r);
+    recent.length = Math.min(recent.length, RECENT_RECEIPTS);
+  });
+  lifecycle.onReceiptSettled((r) => {
+    if (r.kind === "probe") probeSettled(r);
+    saveReceipt(r, probeFields.get(r.signature)).catch((e: Error) => console.error(`[db] receipt ${r.signature}: ${e.message}`));
+    const link = `https://solscan.io/tx/${r.signature}`;
+    const landed = r.landedSlot === null ? "not landed" : `landed slot ${r.landedSlot} (+${r.landedSlot - r.sentSlot})`;
+    console.log(`[${r.kind}] ${r.failure ?? "finalized"} tip ${r.tip} ${landed} beam ${r.beam ? `${r.beam.region} landed=${r.beam.is_landed}` : "no record"} ${link}`);
+  });
+
+  // The chain tip guards slots-to-land against a lagging stream.
+  const probeWallet = await startProbes(
+    () => Math.max(processed, chainTip),
+    (r, fields) => {
+      probeFields.set(r.signature, fields);
+      saveReceipt(r, fields).catch((e: Error) => console.error(`[db] receipt ${r.signature}: ${e.message}`));
+    },
+  );
 
   setInterval(refreshLag, LAG_INTERVAL_MS);
   setInterval(() => {
@@ -50,29 +84,66 @@ async function serve(): Promise<void> {
       (e: Error) => console.warn(`[leader-tracking] ${e.message}`),
     );
   }, 2_000);
-
-  const streams = [grpc, mirage, blur];
-  let last = { at: Date.now(), bytes: streams.map((s) => s.bytes), blur: { ...blurCounts } };
   setInterval(() => {
-    const secs = (Date.now() - last.at) / 1000;
-    const mbps = (s: StreamHealth, i: number) => `${s.name} ${((s.bytes - (last.bytes[i] ?? 0)) / secs / 1e6).toFixed(3)} MB/s${s.connected ? "" : " (down)"}`;
-    const rates = Object.entries(blurCounts).map(([t, n]) => `${t} ${((n - (last.blur[t] ?? 0)) / secs).toFixed(1)}/s`);
+    if (tipState().samples) quote(2, 0.9, probeOutcomes()).then((q) => bus.emit("quote", q), () => undefined);
+  }, 5_000);
+  setInterval(() => {
     const t = tipState();
-    const rows = t.window.slice(-120);
-    const avgTips = rows.reduce((a, r) => a + r.count, 0) / (rows.length || 1);
+    const race = raceStats();
     console.log(
-      [
-        `[status] slot ${processed} (chain tip ${chainTip}, behind ${behind})`,
-        `bandwidth: ${streams.map(mbps).join(", ")}`,
-        `tips: ${avgTips.toFixed(1)}/slot over ${rows.length} slots, samples ${t.samples} (${t.source}, beam ${t.beamSamples})`,
-        `blur: ${rates.join(", ")}`,
-        `race: ${JSON.stringify(raceStats())}`,
-        `lag: k=${t.lag.k} r=${t.lag.r} n=${t.lag.n} qualifies=${t.lag.qualifies}`,
-      ].join("\n  "),
+      `[status] slot ${processed} behind ${behind} | ${streams().map((s) => `${s.name} ${s.connected ? "up" : "down"}`).join(", ")} | ` +
+        `quote samples ${t.samples}, beam floor at p${t.floorPercentile} | race grpc ${race.wins.grpc} mirage ${race.wins.mirage} | ` +
+        `lag k=${t.lag.k} r=${t.lag.r} | probe budget left ${budgetState().leftLamports}`,
     );
-    last = { at: Date.now(), bytes: streams.map((s) => s.bytes), blur: { ...blurCounts } };
   }, STATUS_EVERY_MS);
-  console.log(`[photon] streaming (gRPC, Mirage, Blur) with ${beamTips.length} Beam tip addresses`);
+
+  const num = (q: URLSearchParams, name: string, fallback: number, lo: number, hi: number) => {
+    const v = Number(q.get(name) ?? fallback);
+    if (!Number.isFinite(v) || v < lo || v > hi) throw new HttpError(400, `${name} must be between ${lo} and ${hi}`);
+    return v;
+  };
+  const calibrationNow = () =>
+    calibration(probeRecords().filter((p) => p.settled && p.calibrate && p.failure !== "send_rejected").map((p) => ({
+      bucket: p.bucket,
+      predicted: p.predicted,
+      slotsToLand: p.landedSlot === null ? null : p.landedSlot - p.sentSlot,
+    })));
+
+  startServer({
+    "GET /health": () => ({ ok: streams().every((s) => s.connected), slot: processed, behind, streams: streams() }),
+    "GET /stats": () => ({
+      slot: processed,
+      chainTip,
+      behind,
+      streams: streams(),
+      race: raceStats(),
+      blur: { counts: blurCounts, since: startedAt },
+      tips: tipState(),
+      calibration: calibrationNow(),
+      probe: { wallet: probeWallet, ...budgetState() },
+      receipts: recent,
+    }),
+    "GET /quote": ({ query }) => quote(Math.round(num(query, "deadline", 2, 1, 32)), num(query, "confidence", 0.9, 0.01, 0.999), probeOutcomes()),
+    "GET /tips/addresses": () => ({ beam: beamTips, jito: JITO_TIP_ACCOUNTS }),
+    "POST /send": async ({ body }) => {
+      const tx = (body as { tx?: unknown } | undefined)?.tx;
+      if (typeof tx !== "string") throw new HttpError(400, "body must be { tx: base64 signed transaction }");
+      try {
+        const r = await lifecycle.submitSigned(tx, Math.max(processed, chainTip), beamSet);
+        return { signature: r.signature };
+      } catch (e) {
+        throw new HttpError(400, (e as Error).message);
+      }
+    },
+    "GET /receipt/:signature": async ({ params: [signature] }) => {
+      const live = recent.find((r) => r.signature === signature) ?? lifecycle.activeReceipts().find((r) => r.signature === signature);
+      const row = live ?? (await receiptBySignature(signature as string));
+      if (!row) throw new HttpError(404, "unknown signature");
+      return row;
+    },
+    "GET /calibration": calibrationNow,
+  });
+  console.log(`[photon] region streams up; ${beamTips.length} Beam tip addresses; probes ${probeWallet ? "on" : "off (PROBE_SECRET not set)"}`);
 }
 
 const mode = process.argv[2];

@@ -8,6 +8,13 @@
       "when": 1791398220270,
       "tag": "0000_slot_stats",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791406716497,
+      "tag": "0001_receipts",
+      "breakpoints": true
     }
   ]
 }

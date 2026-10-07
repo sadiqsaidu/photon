@@ -14,14 +14,15 @@ function num(name: string, fallback: number): number {
   return n;
 }
 
-const REGIONS = ["", "nyc", "fra", "ams"];
-const region = (env.SOLAMI_REGION ?? "").toLowerCase();
-if (!REGIONS.includes(region)) throw new Error(`SOLAMI_REGION must be one of nyc, fra, ams (or empty), got "${region}"`);
-const host = (service: string) => `${region ? `${region}.` : ""}${service}.solami.dev`;
+// ams measured fastest from where this was built; "global" routes to the nearest node.
+const REGIONS = ["nyc", "fra", "ams", "global"];
+const region = (env.SOLAMI_REGION || "ams").toLowerCase();
+if (!REGIONS.includes(region)) throw new Error(`SOLAMI_REGION must be one of nyc, fra, ams, global; got "${region}"`);
+const host = (service: string) => `${region === "global" ? "" : `${region}.`}${service}.solami.dev`;
 
 export const config = {
   apiKey: env.SOLAMI_API_KEY ?? "",
-  region: region || "global",
+  region,
   rpcUrl: `https://${host("rpc")}/sol`,
   apiUrl: `https://${host("api")}`,
   grpcUrl: `https://${host("grpc")}`,
@@ -60,6 +61,8 @@ export const JITO_TIP_ACCOUNTS = [
 // Beam rejects transactions whose tip is below this floor (tip_too_low).
 export const BEAM_MIN_TIP = 100_000;
 export const BASE_FEE_PER_SIGNATURE = 5_000;
+// A blockhash stays valid for 150 blocks after the block that produced it.
+export const BLOCKHASH_VALID_BLOCKS = 150;
 
 export const TIP_WINDOW_SLOTS = 600;
 export const BEAM_MIN_SAMPLES = 200;

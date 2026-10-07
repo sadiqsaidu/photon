@@ -28,23 +28,20 @@ export interface GrpcHandlers {
   onSlot(slot: number, status: SlotStatus): void;
   onBlock(slot: number, blockhash: string, blockHeight: number): void;
   onTip(tip: Tip): void;
-  onWatchedTx(signature: string, slot: number, failed: boolean): void;
+  onTx(signature: string, slot: number, failed: boolean): void;
 }
 
 const hex = (k: Uint8Array) => Buffer.from(k).toString("hex");
 const BYTE_SAMPLE_EVERY = 16;
 
-function request(tipAccounts: string[], watch: string[], fromSlot: number): SubscribeRequest {
-  const transactions: SubscribeRequest["transactions"] = {
-    tips: { vote: false, failed: false, accountInclude: tipAccounts, accountExclude: [], accountRequired: [] },
-  };
-  if (watch.length) {
-    transactions.watch = { vote: false, failed: true, accountInclude: watch, accountExclude: [], accountRequired: [] };
-  }
+// Every transaction Photon sends carries a Beam tip, so the tip-account filter
+// also drives lifecycle tracking. `failed` is left unset: true would mean
+// failed transactions only, and failed_onchain needs both.
+function request(tipAccounts: string[], fromSlot: number): SubscribeRequest {
   return {
     slots: { slots: { filterByCommitment: false } },
     blocksMeta: { blocks: {} },
-    transactions,
+    transactions: { tips: { vote: false, accountInclude: tipAccounts, accountExclude: [], accountRequired: [] } },
     accounts: {},
     transactionsStatus: {},
     blocks: {},
@@ -77,7 +74,7 @@ function tipOf(tx: TxInfo, slot: number, jito: Set<string>, beam: Set<string>): 
   return { slot, signature: bs58.encode(tx.signature), lamports, source, payer: bs58.encode(message.accountKeys[0] ?? new Uint8Array()) };
 }
 
-export function startGrpc(beamTips: string[], watch: string[], h: GrpcHandlers): StreamHealth {
+export function startGrpc(beamTips: string[], h: GrpcHandlers): StreamHealth {
   const toHex = (a: string) => hex(bs58.decode(a));
   const jito = new Set(JITO_TIP_ACCOUNTS.map(toHex));
   const beam = new Set(beamTips.map(toHex));
@@ -99,8 +96,8 @@ export function startGrpc(beamTips: string[], watch: string[], h: GrpcHandlers):
     const tx = u.transaction?.transaction;
     if (tx && u.transaction) {
       const slot = Number(u.transaction.slot);
-      if (u.filters.includes("watch")) h.onWatchedTx(bs58.encode(tx.signature), slot, Boolean(tx.meta?.err));
-      if (u.filters.includes("tips")) {
+      h.onTx(bs58.encode(tx.signature), slot, Boolean(tx.meta?.err));
+      if (!tx.meta?.err) {
         const tip = tipOf(tx, slot, jito, beam);
         if (tip) h.onTip(tip);
       }
@@ -110,6 +107,8 @@ export function startGrpc(beamTips: string[], watch: string[], h: GrpcHandlers):
   return supervise("grpc", async (health, signal) => {
     const client = new yellowstone.default(config.grpcUrl, requireApiKey(), {
       "grpc.max_receive_message_length": 64 * 1024 * 1024,
+      // The 64 KB HTTP/2 default caps a long-haul stream below the tip feed's ~1 MB/s.
+      "grpc-node.flow_control_window": 16 * 1024 * 1024,
     });
     const stream = await client.subscribe();
     await new Promise<void>((resolve, reject) => {
@@ -124,7 +123,7 @@ export function startGrpc(beamTips: string[], watch: string[], h: GrpcHandlers):
       stream.on("error", reject);
       stream.on("end", resolve);
       // Resume one slot early after a reconnect; tips are deduplicated by signature.
-      stream.write(request(tipAccounts, watch, lastSlot ? lastSlot - 1 : 0), (err: Error | null | undefined) => {
+      stream.write(request(tipAccounts, lastSlot ? lastSlot - 1 : 0), (err: Error | null | undefined) => {
         if (err) reject(err);
         else health.connected = true;
       });
