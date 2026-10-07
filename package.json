@@ -11,7 +11,7 @@
     "doctor": "tsx --env-file-if-exists=.env src/main.ts doctor",
     "demo": "tsx --env-file-if-exists=.env src/main.ts demo",
     "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/main.js serve",
+    "start": "node --max-old-space-size=256 dist/main.js serve",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",

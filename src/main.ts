@@ -250,6 +250,9 @@ function validAddress(value: unknown): string {
   }
 }
 
+// Hosts stop instances with SIGTERM; exit cleanly so exit hooks run.
+for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => process.exit(0));
+
 const mode = process.argv[2];
 
 async function main(): Promise<void> {
