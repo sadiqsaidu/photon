@@ -7,7 +7,8 @@ import {
   PRIORITY_FEE_TTL_MS,
 } from "./config.js";
 import { rpc } from "./solami.js";
-import { distribution, floorPercentile, forecastAt, heatMultiplier, percentile, rankOf } from "./tips.js";
+import { percentile, rankOf } from "./stats.js";
+import { distribution, floorPercentile, forecastAt, heatMultiplier } from "./tips.js";
 
 // Calibration scores every probe against this deadline.
 export const CALIBRATION_DEADLINE = 2;
@@ -19,7 +20,7 @@ export interface ProbeOutcome {
   slotsToLand: number | null;
 }
 
-export const ALL_REACHABLE = BUCKETS.map(() => true);
+const ALL_REACHABLE = BUCKETS.map(() => true);
 
 export function bucketOf(pct: number): number {
   const i = BUCKETS.findIndex((b) => pct >= b.lo && pct < b.hi);
@@ -76,7 +77,7 @@ export function pickBucket(p: number[], confidence: number, reachable = ALL_REAC
   return { index: open.at(-1)?.i ?? p.length - 1, meetsConfidence: false };
 }
 
-export function bucketPrice(index: number, deadline: number): number {
+function bucketPrice(index: number, deadline: number): number {
   const b = BUCKETS[index] as (typeof BUCKETS)[number];
   const pct = b.hi >= 100 ? TOP_PERCENTILE : b.hi;
   return Math.min(config.tipCeilingLamports, Math.max(BEAM_MIN_TIP, forecastAt(pct, deadline)));

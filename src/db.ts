@@ -183,7 +183,3 @@ export function latestReceipts(n: number): Promise<ReceiptRow[]> {
 export function probeRows(): Promise<ReceiptRow[]> {
   return db.select().from(receipts).where(eq(receipts.kind, "probe")).orderBy(desc(receipts.createdAt));
 }
-
-export function closeDb(): Promise<void> {
-  return pool.end();
-}

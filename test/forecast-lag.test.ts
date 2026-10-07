@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeLag, holt, pearson, percentile, rankOf } from "../src/tips.js";
+import { computeLag, holt, pearson, percentile, rankOf } from "../src/stats.js";
 
 describe("percentile and rank", () => {
   const sorted = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];

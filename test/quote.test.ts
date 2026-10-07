@@ -64,7 +64,7 @@ describe("calibration", () => {
 
 describe("tipForBucket", async () => {
   const { tipForBucket, bucketOf } = await import("../src/quote.js");
-  const { rankOf } = await import("../src/tips.js");
+  const { rankOf } = await import("../src/stats.js");
   // 40% of eligible tips sit exactly at the Beam floor, the rest spread above.
   const sorted = [...Array(40).fill(100_000), ...Array.from({ length: 60 }, (_, i) => 110_000 + i * 10_000)];
 

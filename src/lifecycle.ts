@@ -96,7 +96,7 @@ export function confirmedBlockhash() {
   return latestBlockhash;
 }
 
-export function lastValidHeightOf(blockhash: string): number | null {
+function lastValidHeightOf(blockhash: string): number | null {
   return validUntil.get(blockhash) ?? null;
 }
 

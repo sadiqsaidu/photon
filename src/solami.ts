@@ -179,11 +179,11 @@ export interface MirageSubscription {
   label: string;
 }
 
-export function mirageList(): Promise<MirageSubscription[]> {
+function mirageList(): Promise<MirageSubscription[]> {
   return api<MirageSubscription[]>("/mirage/list", { auth: "bearer", body: {} });
 }
 
-export function mirageCreate(label: string, filter: Record<string, unknown>): Promise<MirageSubscription> {
+function mirageCreate(label: string, filter: Record<string, unknown>): Promise<MirageSubscription> {
   return api<MirageSubscription>("/mirage/create", { auth: "bearer", body: { label, filter } });
 }
 

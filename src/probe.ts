@@ -10,7 +10,6 @@ import {
 import bs58 from "bs58";
 import {
   BASE_FEE_PER_SIGNATURE,
-  BEAM_MIN_TIP,
   BUCKETS,
   bus,
   config,
@@ -25,9 +24,9 @@ import type { ProbeFields, ReceiptRow } from "./db.js";
 import { confirmedBlockhash, rejected, track, type FailureClass, type Receipt } from "./lifecycle.js";
 import { bucketOf, CALIBRATION_DEADLINE, probabilities, reachableBuckets, tipForBucket, type ProbeOutcome } from "./quote.js";
 import { beamSend, beamTipAddresses, rpc } from "./solami.js";
-import { distribution, percentile, rankOf } from "./tips.js";
+import { distribution } from "./tips.js";
 
-export const PROBE_FEE = BASE_FEE_PER_SIGNATURE + Math.ceil((PROBE_COMPUTE_UNIT_PRICE * PROBE_COMPUTE_UNIT_LIMIT) / 1_000_000);
+const PROBE_FEE = BASE_FEE_PER_SIGNATURE + Math.ceil((PROBE_COMPUTE_UNIT_PRICE * PROBE_COMPUTE_UNIT_LIMIT) / 1_000_000);
 // Kept in the wallet so it stays rent exempt.
 const RESERVE_LAMPORTS = 1_000_000;
 
@@ -87,18 +86,15 @@ export function probeSettled(r: Receipt): void {
   rec.settled = true;
 }
 
-export function probeRecords(): ProbeRecord[] {
-  return [...records.values()];
-}
-
-export function probeOutcomes(): ProbeOutcome[] {
-  return probeRecords()
+// Settled probes that count toward calibration.
+export function probeOutcomes(): (ProbeOutcome & { predicted: number })[] {
+  return [...records.values()]
     .filter((r) => r.settled && r.calibrate && r.failure !== "send_rejected")
-    .map((r) => ({ bucket: r.bucket, slotsToLand: r.landedSlot === null ? null : r.landedSlot - r.sentSlot }));
+    .map((r) => ({ bucket: r.bucket, predicted: r.predicted, slotsToLand: r.landedSlot === null ? null : r.landedSlot - r.sentSlot }));
 }
 
 // Unsettled probes count in full: they may still land.
-export function spentLamports(): number {
+function spentLamports(): number {
   let spent = 0;
   for (const r of records.values()) {
     if (r.failure === "send_rejected" || r.failure === "expired_blockhash" || r.failure === "leader_skipped") continue;
@@ -111,7 +107,7 @@ export function budgetState() {
   return { budgetLamports: budget, spentLamports: spentLamports(), leftLamports: Math.max(0, budget - spentLamports()), stopped, stopReason };
 }
 
-export function bucketCounts(): number[] {
+function bucketCounts(): number[] {
   const counts = BUCKETS.map(() => 0);
   for (const r of records.values()) if (r.calibrate && r.failure !== "send_rejected") counts[r.bucket]!++;
   return counts;
@@ -129,7 +125,7 @@ function nextBucket(counts: number[], reachable: boolean[], random: boolean): nu
 
 // The probes this run would send, in order, and their cost. `limit` caps the
 // count (PROBE_LIMIT); 0 means until every reachable bucket is full.
-export function fillPlan(sorted: number[], limit = 0) {
+function fillPlan(sorted: number[], limit = 0) {
   const reachable = reachableBuckets(sorted);
   const counts = bucketCounts();
   const sends: { bucket: number; tip: number }[] = [];
