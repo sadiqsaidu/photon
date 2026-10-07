@@ -1,6 +1,6 @@
 import { yellowstone } from "./grpc.js";
-import { mirageSlotSubscription, wsUrl } from "./solami.js";
-import { supervise, wsSession, type StreamHealth } from "./stream.js";
+import { mirageSlotSubscription, SolamiError, wsUrl } from "./solami.js";
+import { streamError, supervise, wsSession, type StreamHealth } from "./stream.js";
 
 export type RaceSource = "grpc" | "mirage";
 
@@ -39,7 +39,10 @@ export function raceStats() {
 
 export function startMirage(): StreamHealth {
   return supervise("mirage", async (health, signal) => {
-    const id = await mirageSlotSubscription();
+    const id = await mirageSlotSubscription().catch((e: Error) => {
+      const refused = e instanceof SolamiError && [401, 402, 403].includes(e.status ?? 0);
+      throw streamError(e.message, { blocked: refused });
+    });
     await wsSession(wsUrl(`/mirage/stream/${id}`), health, signal, (data, binary) => {
       if (!binary) return;
       const u = yellowstone.SubscribeUpdate.decode(new Uint8Array(data));

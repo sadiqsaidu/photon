@@ -46,7 +46,7 @@ function readBody(req: http.IncomingMessage): Promise<{ raw: Buffer; body: unkno
 }
 
 function sse(res: http.ServerResponse): void {
-  res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
+  res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive", "x-accel-buffering": "no" });
   res.write(": photon\n\n");
   const listeners = SSE_EVENTS.map((event) => {
     const fn = (data: unknown) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -86,6 +86,6 @@ export function startServer(routes: Record<string, Handler>): http.Server {
       res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify({ error: (e as Error).message }));
     }
   });
-  server.listen(config.port, () => console.log(`[api] listening on :${config.port}`));
+  server.listen(config.port, "0.0.0.0", () => console.log(`[api] listening on 0.0.0.0:${config.port}`));
   return server;
 }

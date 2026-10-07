@@ -2,7 +2,7 @@ import { PublicKey } from "@solana/web3.js";
 import { onWebhookPost, resumeWebhook, runAudit, watchWallet, webhookHealth } from "./audit.js";
 import { blurCounts, startBlur } from "./blur.js";
 import { AUDIT_DEFAULT_LIMIT, AUDIT_MAX_LIMIT, bus, JITO_TIP_ACCOUNTS, LAG_INTERVAL_MS, requireApiKey } from "./config.js";
-import { checkDb, latestReceipts, loadAudit, markLanded, probeRows, receiptBySignature, saveReceipt, saveSlots, type ProbeFields, type ReceiptRow } from "./db.js";
+import { latestReceipts, migrateDb, prune, storedSlots, loadAudit, markLanded, probeRows, receiptBySignature, saveReceipt, saveSlots, type ProbeFields, type ReceiptRow } from "./db.js";
 import { demo } from "./demo.js";
 import { doctor } from "./doctor.js";
 import { startGrpc } from "./grpc.js";
@@ -13,15 +13,30 @@ import { budgetState, loadProbes, probeOutcomes, probeRecords, probeSettled, sta
 import { calibration, quote, reachableBuckets } from "./quote.js";
 import { HttpError, startServer } from "./server.js";
 import { beamTipAddresses, leaderNow } from "./solami.js";
-import { type SlotStats, addHeat, addTip, confirmedRow, distribution, onConfirmed, recentHeat, refreshLag, tipState, useLeaders } from "./tips.js";
+import { type SlotStats, addHeat, addTip, confirmedRow, distribution, onConfirmed, recentHeat, refreshLag, seedWindow, tipState, useLeaders } from "./tips.js";
 
 const RECENT_RECEIPTS = 20;
 const STATUS_EVERY_MS = 60_000;
+const PRUNE_EVERY_MS = 3_600_000;
+
+// A Solami refusal (missing permission, plan or balance) degrades one feature;
+// the server keeps running and serving stored data instead of crash-looping.
+const degraded = new Map<string, string>();
+async function optional<T>(feature: string, fn: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    degraded.set(feature, (e as Error).message);
+    console.warn(`[${feature}] unavailable: ${(e as Error).message}`);
+    return fallback;
+  }
+}
 
 async function serve(): Promise<void> {
   requireApiKey();
-  await checkDb();
-  const beamTips = await beamTipAddresses();
+  await migrateDb();
+  seedWindow((await storedSlots(150)).reverse());
+  const beamTips = await optional("beam", beamTipAddresses, []);
   const beamSet = new Set(beamTips);
   await loadProbes(await probeRows(), markLanded);
   const startedAt = Date.now();
@@ -58,8 +73,14 @@ async function serve(): Promise<void> {
   });
   const mirage = startMirage();
   const blur = startBlur(() => processed, addHeat);
-  await resumeWebhook();
+  await optional("webhooks", resumeWebhook, undefined);
   const streams = () => [grpc, mirage, ...blur, webhookHealth()].filter((s) => s !== null).map((s) => ({ ...s }));
+  const degradedNow = () => [
+    ...[...degraded].map(([feature, error]) => ({ feature, error })),
+    ...streams()
+      .filter((s) => s.blocked)
+      .map((s) => ({ feature: s.name, error: s.blocked as string })),
+  ];
 
   bus.on("lifecycle", (r: lifecycle.Receipt) => {
     const i = recent.findIndex((x) => x.signature === r.signature);
@@ -76,13 +97,20 @@ async function serve(): Promise<void> {
   });
 
   // The chain tip guards slots-to-land against a lagging stream.
-  const probeWallet = await startProbes(
-    () => Math.max(processed, chainTip),
-    (r, fields) => {
-      probeFields.set(r.signature, fields);
-      saveReceipt(r, fields).catch((e: Error) => console.error(`[db] receipt ${r.signature}: ${e.message}`));
-    },
+  const probeWallet = await optional(
+    "probes",
+    () =>
+      startProbes(
+        () => Math.max(processed, chainTip),
+        (r, fields) => {
+          probeFields.set(r.signature, fields);
+          saveReceipt(r, fields).catch((e: Error) => console.error(`[db] receipt ${r.signature}: ${e.message}`));
+        },
+      ),
+    null,
   );
+  setInterval(() => prune().catch((e: Error) => console.error(`[db] prune: ${e.message}`)), PRUNE_EVERY_MS).unref();
+  setTimeout(() => prune().catch((e: Error) => console.error(`[db] prune: ${e.message}`)), 60_000).unref();
 
   setInterval(refreshLag, LAG_INTERVAL_MS);
   // Slot rows are written in one batched insert every couple of seconds.
@@ -130,12 +158,13 @@ async function serve(): Promise<void> {
     );
 
   startServer({
-    "GET /health": () => ({ ok: streams().every((s) => s.connected), slot: processed, behind, maxBehind, streams: streams() }),
+    "GET /health": () => ({ ok: streams().every((s) => s.connected), slot: processed, behind, maxBehind, degraded: degradedNow(), streams: streams() }),
     "GET /stats": () => ({
       slot: processed,
       chainTip,
       behind,
       maxBehind,
+      degraded: degradedNow(),
       streams: streams(),
       race: raceStats(),
       blur: { counts: blurCounts, since: startedAt },

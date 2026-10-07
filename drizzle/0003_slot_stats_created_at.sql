@@ -1,0 +1,1 @@
+CREATE INDEX "slot_stats_created_at_idx" ON "slot_stats" USING btree ("created_at");

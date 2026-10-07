@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: photon-api
+    runtime: node
+    region: frankfurt
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: SOLAMI_API_KEY
+        sync: false
+      - key: SOLAMI_REGION
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: PROBE_SECRET
+        sync: false
+      - key: PROBE_BUDGET_SOL
+        sync: false
+      - key: PROBE_INTERVAL_SEC
+        sync: false
+      - key: PROBE_LIMIT
+        sync: false
+      - key: TIP_CEILING_LAMPORTS
+        sync: false
+      - key: AUDIT_MAX_BLOCKS
+        sync: false
+      - key: WEBHOOK_PUBLIC_URL
+        sync: false

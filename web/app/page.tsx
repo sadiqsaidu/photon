@@ -81,6 +81,17 @@ export default function Dashboard() {
           <span className="tag bad">backend unreachable</span> <span className="muted">{live.error}. Start it with npm run serve.</span>
         </div>
       )}
+      {s && s.degraded.length > 0 && (
+        <div className="panel" role="status">
+          <span className="tag bad">degraded</span>{" "}
+          {s.degraded.map((d) => (
+            <span key={d.feature} className="muted" style={{ marginRight: 12 }}>
+              {d.feature}: {d.error}
+            </span>
+          ))}
+          <span className="faint">Stored data stays available; refused streams retry every 5 minutes.</span>
+        </div>
+      )}
       <QuoteWidget />
       <TipSurface stats={s} />
       <div className="grid-2">

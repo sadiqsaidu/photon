@@ -172,17 +172,22 @@ export function startGrpc(beamTips: string[], h: GrpcHandlers): StreamHealth {
         stream.cancel();
         reject(signal.reason as Error);
       });
+      let received = false;
       stream.on("data", (u: SubscribeUpdate) => {
+        received = true;
         health.lastEventAt = Date.now();
         enqueue(u, health);
       });
       stream.on("error", (e: Error & { code?: number }) => {
-        // gRPC 7 PERMISSION_DENIED and 16 UNAUTHENTICATED are refusals; 8
-        // RESOURCE_EXHAUSTED is Solami closing a stream that read too slowly
-        // (or an empty balance, which is also a refusal).
+        // Solami cancels a subscription it will not serve (invalid key, plan or
+        // permission) at once, before any data. 7 PERMISSION_DENIED and 16
+        // UNAUTHENTICATED are refusals too; 8 RESOURCE_EXHAUSTED is a stream
+        // closed for reading too slowly, or an empty balance.
         const billing = /balance|bandwidth|plan|payment/i.test(e.message);
+        const refusedAtOnce = e.code === 1 && !received && !signal.aborted;
         const backpressure = e.code === 8 && !billing ? true : /backpressure|slow consumer|lagging|buffer full/i.test(e.message);
-        reject(streamError(e.message, { blocked: e.code === 7 || e.code === 16 || (e.code === 8 && billing), backpressure }));
+        const message = refusedAtOnce ? "subscription cancelled by Solami before any data (key, plan or permission)" : e.message;
+        reject(streamError(message, { blocked: refusedAtOnce || e.code === 7 || e.code === 16 || (e.code === 8 && billing), backpressure }));
       });
       stream.on("end", resolve);
       // Resume one slot early after a reconnect; tips are deduplicated by

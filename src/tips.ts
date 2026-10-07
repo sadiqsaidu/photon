@@ -142,6 +142,18 @@ export function useLeaders(fn: (slot: number) => string | null): void {
   leaderOf = fn;
 }
 
+// Stored rows for the window, so the dashboard has data before (or without)
+// a live stream.
+export function seedWindow(rows: SlotStats[]): void {
+  for (const r of rows) {
+    if (recent.some((x) => x.slot === r.slot)) continue;
+    recent.push({ ...r, leader: r.leader ?? null });
+    heat.set(r.slot, r.heat);
+    if (r.slot > lastConfirmed) lastConfirmed = r.slot;
+  }
+  recent.sort((a, b) => a.slot - b.slot);
+}
+
 export function addTip(tip: Tip): void {
   if (tip.slot <= lastConfirmed - TIP_WINDOW_SLOTS) return;
   let slot = pending.get(tip.slot);

@@ -1,6 +1,8 @@
+import { fileURLToPath } from "node:url";
 import { desc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { bigint, doublePrecision, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { bigint, doublePrecision, index, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import pg from "pg";
 import { config } from "./config.js";
 import type { Receipt } from "./lifecycle.js";
@@ -21,7 +23,7 @@ export const slotStats = pgTable("slot_stats", {
   heat: doublePrecision("heat").notNull(),
   source: text("source").notNull().default("stream"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [index("slot_stats_created_at_idx").on(t.createdAt)]);
 
 export const leaderSkips = pgTable("leader_skips", {
   slot: bigint("slot", { mode: "number" }).primaryKey(),
@@ -53,15 +55,44 @@ export const receipts = pgTable("receipts", {
 
 export type ReceiptRow = typeof receipts.$inferSelect;
 
-const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 8 });
+// sslmode follows libpq: "require" encrypts without verifying the server
+// certificate (hosted Postgres such as Supabase signs with its own CA);
+// verify-ca and verify-full also verify it.
+function poolConfig(url: string): pg.PoolConfig {
+  const u = new URL(url);
+  const mode = u.searchParams.get("sslmode");
+  u.searchParams.delete("sslmode");
+  const ssl = mode && mode !== "disable" ? { rejectUnauthorized: mode === "verify-ca" || mode === "verify-full" } : undefined;
+  return { connectionString: u.toString(), ssl, max: 5 };
+}
+
+const pool = new pg.Pool(poolConfig(config.databaseUrl));
 export const db = drizzle(pool);
 
-export async function checkDb(): Promise<void> {
+// Migrations ship in drizzle/ next to src/ and dist/, so production needs no dev tooling.
+export async function migrateDb(): Promise<void> {
   try {
-    await pool.query("select 1 from slot_stats limit 1");
+    await migrate(db, { migrationsFolder: fileURLToPath(new URL("../drizzle", import.meta.url)) });
   } catch (e) {
-    throw new Error(`Postgres at DATABASE_URL is not ready (${(e as Error).message}). Run: docker compose up -d db && npm run db:migrate`);
+    throw new Error(`Postgres at DATABASE_URL is not ready: ${(e as Error).message}`);
   }
+}
+
+const KEEP_AUDITS = 200;
+
+// Keeps the database small: 3 days of slot rows, skips for those slots, and
+// the newest audits (watched ones are never removed).
+export async function prune(): Promise<void> {
+  await db.execute(sql`delete from slot_stats where created_at < now() - interval '3 days'`);
+  await db.execute(sql`delete from leader_skips where slot < (select coalesce(min(slot), 0) from slot_stats)`);
+  await db.execute(sql`
+    delete from audits where address in (
+      select address from audits where coalesce(data->>'watching', 'false') <> 'true'
+      order by updated_at desc offset ${KEEP_AUDITS})`);
+}
+
+export function storedSlots(n: number) {
+  return db.select().from(slotStats).where(eq(slotStats.source, "stream")).orderBy(desc(slotStats.slot)).limit(n);
 }
 
 export async function saveSlots(rows: SlotStats[], source: "stream" | "block" = "stream"): Promise<void> {

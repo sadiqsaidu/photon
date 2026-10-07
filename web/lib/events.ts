@@ -66,6 +66,7 @@ export interface Stats {
   chainTip: number;
   behind: number;
   maxBehind: number;
+  degraded: { feature: string; error: string }[];
   streams: StreamHealth[];
   race: { wins: { grpc: number; mirage: number }; matched: number; grpcLeadP50Ms: number | null };
   blur: { counts: Record<string, number>; since: number };
