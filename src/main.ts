@@ -10,10 +10,10 @@ import { leaderOf, onFinalized, refreshLeaders, upcomingLeaders } from "./leader
 import * as lifecycle from "./lifecycle.js";
 import { raceSlot, raceStats, startMirage } from "./mirage.js";
 import { budgetState, loadProbes, probeOutcomes, probeRecords, probeSettled, startProbes } from "./probe.js";
-import { calibration, quote } from "./quote.js";
+import { calibration, quote, reachableBuckets } from "./quote.js";
 import { HttpError, startServer } from "./server.js";
 import { beamTipAddresses, leaderNow } from "./solami.js";
-import { type SlotStats, addHeat, addTip, confirmedRow, onConfirmed, recentHeat, refreshLag, tipState, useLeaders } from "./tips.js";
+import { type SlotStats, addHeat, addTip, confirmedRow, distribution, onConfirmed, recentHeat, refreshLag, tipState, useLeaders } from "./tips.js";
 
 const RECENT_RECEIPTS = 20;
 const STATUS_EVERY_MS = 60_000;
@@ -122,11 +122,12 @@ async function serve(): Promise<void> {
     return v;
   };
   const calibrationNow = () =>
-    calibration(probeRecords().filter((p) => p.settled && p.calibrate && p.failure !== "send_rejected").map((p) => ({
-      bucket: p.bucket,
-      predicted: p.predicted,
-      slotsToLand: p.landedSlot === null ? null : p.landedSlot - p.sentSlot,
-    })));
+    calibration(
+      probeRecords()
+        .filter((p) => p.settled && p.calibrate && p.failure !== "send_rejected")
+        .map((p) => ({ bucket: p.bucket, predicted: p.predicted, slotsToLand: p.landedSlot === null ? null : p.landedSlot - p.sentSlot })),
+      reachableBuckets(distribution().sorted),
+    );
 
   startServer({
     "GET /health": () => ({ ok: streams().every((s) => s.connected), slot: processed, behind, maxBehind, streams: streams() }),

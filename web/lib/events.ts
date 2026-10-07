@@ -58,7 +58,7 @@ export interface Calibration {
   probes: number;
   calibrated: boolean;
   brier: number | null;
-  buckets: { lo: number; hi: number; n: number; predicted: number | null; actual: number | null; model: number }[];
+  buckets: { lo: number; hi: number; n: number; predicted: number | null; actual: number | null; model: number; status: string }[];
 }
 
 export interface Stats {

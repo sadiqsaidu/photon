@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BUCKETS } from "../src/config.js";
-import { brier, calibration, landingModel, pickBucket, probabilities } from "../src/quote.js";
+import { brier, calibration, landingModel, pickBucket, probabilities, reachableBuckets } from "../src/quote.js";
 
 const probes = (bucket: number, landed: number, missed: number, slots = 1) => [
   ...Array.from({ length: landed }, () => ({ bucket, slotsToLand: slots })),
@@ -63,7 +63,7 @@ describe("calibration", () => {
 });
 
 describe("tipForBucket", async () => {
-  const { tipForBucket, bucketOf } = await import("../src/probe.js");
+  const { tipForBucket, bucketOf } = await import("../src/quote.js");
   const { rankOf } = await import("../src/tips.js");
   // 40% of eligible tips sit exactly at the Beam floor, the rest spread above.
   const sorted = [...Array(40).fill(100_000), ...Array.from({ length: 60 }, (_, i) => 110_000 + i * 10_000)];
@@ -78,5 +78,29 @@ describe("tipForBucket", async () => {
 
   it("uses the tie value itself for the bucket the tie covers", () => {
     expect(tipForBucket(sorted, 0)!.tip).toBe(100_000);
+  });
+});
+
+describe("buckets above the tip ceiling", () => {
+  const reachable = [true, true, true, false, false];
+
+  it("calibrates once every reachable bucket has 10 probes", () => {
+    const outcomes = [0, 1, 2].flatMap((i) => probes(i, 10, 0));
+    expect(landingModel(outcomes, 2).calibrated).toBe(false);
+    expect(landingModel(outcomes, 2, reachable).calibrated).toBe(true);
+    expect(calibration(outcomes.map((o) => ({ ...o, predicted: 0.5 })), reachable).buckets[3]?.status).toBe("above tip ceiling");
+  });
+
+  it("never quotes an unreachable bucket", () => {
+    expect(pickBucket([0.5, 0.65, 0.8, 0.9, 0.95], 0.9, reachable)).toEqual({ index: 2, meetsConfidence: false });
+    expect(pickBucket([0.5, 0.65, 0.8, 0.9, 0.95], 0.6, reachable)).toEqual({ index: 1, meetsConfidence: true });
+  });
+
+  it("marks buckets whose cheapest tip exceeds the ceiling", () => {
+    // Half the tips sit far above any ceiling used in practice.
+    const sorted = [...Array.from({ length: 50 }, (_, i) => 100_000 + i * 1_000), ...Array(50).fill(1e12)];
+    // A tip at the ceiling outranks every cheaper tip, landing at p50.
+    expect(reachableBuckets(sorted)).toEqual([true, true, true, false, false]);
+    expect(reachableBuckets([])).toEqual([true, true, true, true, true]);
   });
 });

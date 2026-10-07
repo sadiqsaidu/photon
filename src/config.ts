@@ -32,6 +32,8 @@ export const config = {
   probeSecret: env.PROBE_SECRET ?? "",
   probeIntervalSec: num("PROBE_INTERVAL_SEC", 60),
   probeBudgetSol: num("PROBE_BUDGET_SOL", 0.05),
+  // Max probes one process sends; 0 means until calibrated or out of budget.
+  probeLimit: num("PROBE_LIMIT", 0),
   tipCeilingLamports: num("TIP_CEILING_LAMPORTS", 5_000_000),
   auditMaxBlocks: num("AUDIT_MAX_BLOCKS", 40),
   webhookPublicUrl: env.WEBHOOK_PUBLIC_URL ?? "",

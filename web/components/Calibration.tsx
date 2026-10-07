@@ -14,7 +14,7 @@ export function Calibration({ stats }: { stats: Stats | null }) {
   const c = stats?.calibration;
   const scale = (v: number) => P + v * (S - 2 * P);
   const flip = (v: number) => S - scale(v);
-  const points = (c?.buckets ?? []).map((b, i) => ({ ...b, i })).filter((b) => b.n > 0 && b.predicted !== null && b.actual !== null);
+  const points = (c?.buckets ?? []).map((b, i) => ({ ...b, i })).filter((b) => b.status === "reachable" && b.n > 0 && b.predicted !== null && b.actual !== null);
   const reason = stats?.probe.stopReason;
 
   return (
@@ -68,24 +68,38 @@ export function Calibration({ stats }: { stats: Stats | null }) {
               </tr>
             </thead>
             <tbody>
-              {(c?.buckets ?? []).map((b, i) => (
-                <tr key={i} style={{ background: hover === i ? "var(--raise)" : undefined }}>
-                  <td>
-                    p{b.lo}-{b.hi}
-                  </td>
-                  <td className="r">{b.n}</td>
-                  <td className="r">{pct(b.predicted)}</td>
-                  <td className="r">{pct(b.actual)}</td>
-                  <td className="r">{pct(b.model)}</td>
-                </tr>
-              ))}
+              {(c?.buckets ?? []).map((b, i) =>
+                b.status === "reachable" ? (
+                  <tr key={i} style={{ background: hover === i ? "var(--raise)" : undefined }}>
+                    <td>
+                      p{b.lo}-{b.hi}
+                    </td>
+                    <td className="r">{b.n}</td>
+                    <td className="r">{pct(b.predicted)}</td>
+                    <td className="r">{pct(b.actual)}</td>
+                    <td className="r">{pct(b.model)}</td>
+                  </tr>
+                ) : (
+                  <tr key={i} className="faint">
+                    <td>
+                      p{b.lo}-{b.hi}
+                    </td>
+                    <td colSpan={4} className="r">
+                      <span className="tag">above tip ceiling</span>
+                    </td>
+                  </tr>
+                ),
+              )}
             </tbody>
           </table>
           <p style={{ margin: "10px 0 0" }}>
             Brier score <b className="num">{c?.brier === null || c?.brier === undefined ? "-" : c.brier.toFixed(3)}</b>{" "}
             <span className="muted">over {c?.probes ?? 0} probes (0 is perfect, 0.25 is a coin flip)</span>
           </p>
-          {reason && <p className="faint" style={{ margin: "6px 0 0", fontSize: 11 }}>Probes stopped: {reason}.</p>}
+          <p className="faint" style={{ margin: "6px 0 0", fontSize: 11 }}>
+            Calibrated means every bucket a tip at or below the ceiling can reach has 10 probes; buckets above the ceiling are never quoted.
+            {reason && ` Probes stopped: ${reason}.`}
+          </p>
         </div>
       </div>
     </section>
