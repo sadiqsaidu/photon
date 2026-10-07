@@ -1,6 +1,6 @@
-import { createRequire } from "node:module";
 import WebSocket from "ws";
-import { config, JITO_TIP_ACCOUNTS, requireApiKey } from "./config.js";
+import { config, HEAT_WEIGHTS, JITO_TIP_ACCOUNTS, requireApiKey } from "./config.js";
+import { yellowstone } from "./grpc.js";
 import * as solami from "./solami.js";
 
 interface Row {
@@ -10,9 +10,7 @@ interface Row {
   detail: string;
 }
 
-type Yellowstone = typeof import("@triton-one/yellowstone-grpc");
 type SubscribeUpdate = import("@triton-one/yellowstone-grpc").SubscribeUpdate;
-const yellowstone = createRequire(import.meta.url)("@triton-one/yellowstone-grpc") as Yellowstone;
 const { CommitmentLevel } = yellowstone;
 
 const TIMEOUT_MS = 12_000;
@@ -65,7 +63,7 @@ function grpcFirstSlot(): Promise<string> {
 
 function wsFirstMessage(url: string, accept: (data: WebSocket.RawData, binary: boolean) => string | null): Promise<string> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url);
+    const ws = new WebSocket(url, { agent: solami.wsAgent });
     const finish = (fn: () => void) => {
       ws.removeAllListeners();
       ws.on("error", () => undefined);
@@ -114,7 +112,7 @@ export async function doctor(): Promise<boolean> {
     check(rows, "Blur", "stream first event", () =>
       wsFirstMessage(solami.wsUrl("/data/subscribe", { chain: "solana", type: "swap" }), (data) => {
         const ev = JSON.parse(data.toString()) as { type?: string; slot?: number };
-        return ev.type ? `${ev.type} at slot ${ev.slot ?? "?"}` : null;
+        return ev.type && ev.type in HEAT_WEIGHTS ? `${ev.type} at slot ${ev.slot ?? "?"}` : null;
       }),
     ),
     check(rows, "Data API", "SOL price", async () => {

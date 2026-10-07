@@ -1,3 +1,4 @@
+import https from "node:https";
 import { config, requireApiKey, SOL_MINT } from "./config.js";
 
 export class SolamiError extends Error {
@@ -66,6 +67,10 @@ export async function api<T>(path: string, opts: { auth?: ApiAuth; body?: unknow
   return (await res.json()) as T;
 }
 
+// Honors HTTPS_PROXY/NO_PROXY on Node versions that support proxyEnv; a plain
+// agent everywhere else.
+export const wsAgent = new https.Agent({ proxyEnv: process.env } as https.AgentOptions);
+
 export function wsUrl(path: string, query: Record<string, string> = {}): string {
   const q = new URLSearchParams({ ...query, api_key: requireApiKey() });
   return `${config.wsUrl}${path}?${q}`;
@@ -118,25 +123,43 @@ export function leaderNow(): Promise<LeaderNow> {
   return api<LeaderNow>("/leader-tracking/current", { product: "leader-tracking" });
 }
 
-// Unverified response shape: the price is read from the first numeric-looking
-// `price_usd` / `price` field.
 export async function solPriceUsd(): Promise<number | null> {
-  const body = await api<Record<string, unknown>>(`/data/token/price?chain=solana&address=${SOL_MINT}`, {
+  const rows = await api<{ mint: string; price_usd: string }[]>(`/data/token/price?chain=solana&address=${SOL_MINT}`, {
     auth: "key",
     product: "data",
   });
-  const raw = body.price_usd ?? body.price ?? (body.data as Record<string, unknown> | undefined)?.price_usd;
-  const price = Number(raw);
+  const price = Number(rows.find((r) => r.mint === SOL_MINT)?.price_usd);
   return Number.isFinite(price) && price > 0 ? price : null;
 }
 
 export interface Webhook {
   id: string;
   label: string;
-  addresses: string[];
-  stream: boolean;
   url: string;
+  stream: boolean;
+  addresses: string[];
+  event_types: string[];
+  payload_kind: "enriched" | "raw";
+  region: string;
+  enabled: boolean;
   secret?: string;
+}
+
+// One frame of a stream (or one POST body) for an `enriched` transfer webhook.
+export interface WebhookEvent {
+  webhook_id: string;
+  signature: string;
+  slot: number;
+  status: "succeeded" | "failed";
+  type: string;
+  transfers?: { native: boolean; amount: string; from_owner: string; to_owner: string }[];
+}
+
+// Stream-only webhooks must name a region and are served from that region's host.
+export const webhookRegion = config.region === "global" ? "nyc" : config.region;
+
+export function webhookStreamUrl(id: string): string {
+  return `wss://${webhookRegion}.ws.solami.dev/webhooks/stream/${id}?api_key=${requireApiKey()}`;
 }
 
 export function webhookList(): Promise<Webhook[]> {

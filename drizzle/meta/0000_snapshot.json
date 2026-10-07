@@ -1,126 +1,75 @@
 {
-  "id": "6c9163ae-a6db-4e29-b303-81b480f375b4",
+  "id": "2ca2eeda-43ba-46b8-9767-1af5788803bd",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "public.decisions": {
-      "name": "decisions",
+    "public.slot_stats": {
+      "name": "slot_stats",
       "schema": "",
       "columns": {
-        "id": {
-          "name": "id",
-          "type": "serial",
+        "slot": {
+          "name": "slot",
+          "type": "bigint",
           "primaryKey": true,
           "notNull": true
         },
-        "kind": {
-          "name": "kind",
+        "leader": {
+          "name": "leader",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
-        "context": {
-          "name": "context",
-          "type": "jsonb",
+        "count": {
+          "name": "count",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
-        "output": {
-          "name": "output",
-          "type": "jsonb",
+        "beam_count": {
+          "name": "beam_count",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
-        "reasoning": {
-          "name": "reasoning",
-          "type": "text",
+        "p25": {
+          "name": "p25",
+          "type": "bigint",
           "primaryKey": false,
           "notNull": true
         },
-        "confidence": {
-          "name": "confidence",
+        "p50": {
+          "name": "p50",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "p75": {
+          "name": "p75",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "p90": {
+          "name": "p90",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "max": {
+          "name": "max",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "heat": {
+          "name": "heat",
           "type": "double precision",
           "primaryKey": false,
           "notNull": true
         },
         "created_at": {
           "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.lifecycles": {
-      "name": "lifecycles",
-      "schema": "",
-      "columns": {
-        "signature": {
-          "name": "signature",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "payload": {
-          "name": "payload",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "slot": {
-          "name": "slot",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "tip": {
-          "name": "tip",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "failure": {
-          "name": "failure",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "stages": {
-          "name": "stages",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "deltas": {
-          "name": "deltas",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "trace": {
-          "name": "trace",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "sealed_at": {
-          "name": "sealed_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,

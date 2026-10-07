@@ -1,4 +1,10 @@
+import { EventEmitter } from "node:events";
+
 const env = process.env;
+
+// The one event bus: every SSE event name is emitted here with its payload.
+export const bus = new EventEmitter();
+bus.setMaxListeners(100);
 
 function num(name: string, fallback: number): number {
   const raw = env[name];
