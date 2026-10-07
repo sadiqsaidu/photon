@@ -1,7 +1,15 @@
 import http from "node:http";
 import { bus, config } from "./config.js";
 
-export type Handler = (req: { params: string[]; query: URLSearchParams; body: unknown }) => Promise<unknown> | unknown;
+export interface Request {
+  params: string[];
+  query: URLSearchParams;
+  body: unknown;
+  raw: Buffer;
+  headers: http.IncomingHttpHeaders;
+}
+
+export type Handler = (req: Request) => Promise<unknown> | unknown;
 
 export class HttpError extends Error {
   constructor(
@@ -15,7 +23,7 @@ export class HttpError extends Error {
 const SSE_EVENTS = ["slot", "tips", "heat", "lag", "quote", "probe", "lifecycle", "stream", "audit"];
 const MAX_BODY = 256 * 1024;
 
-function readBody(req: http.IncomingMessage): Promise<unknown> {
+function readBody(req: http.IncomingMessage): Promise<{ raw: Buffer; body: unknown }> {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks: Buffer[] = [];
@@ -25,9 +33,10 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
       else chunks.push(c);
     });
     req.on("end", () => {
-      if (!chunks.length) return resolve(undefined);
+      const raw = Buffer.concat(chunks);
+      if (!raw.length) return resolve({ raw, body: undefined });
       try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString()));
+        resolve({ raw, body: JSON.parse(raw.toString()) });
       } catch {
         reject(new HttpError(400, "body must be JSON"));
       }
@@ -68,7 +77,8 @@ export function startServer(routes: Record<string, Handler>): http.Server {
     try {
       if (!route) throw new HttpError(404, "not found");
       const params = (url.pathname.match(route.pattern) ?? []).slice(1).map(decodeURIComponent);
-      const out = await route.handler({ params, query: url.searchParams, body: await readBody(req) });
+      const { raw, body } = await readBody(req);
+      const out = await route.handler({ params, query: url.searchParams, body, raw, headers: req.headers });
       res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(out));
     } catch (e) {
       const status = e instanceof HttpError ? e.status : 500;

@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { bigint, doublePrecision, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import pg from "pg";
@@ -19,7 +19,19 @@ export const slotStats = pgTable("slot_stats", {
   p90: lamports("p90"),
   max: lamports("max"),
   heat: doublePrecision("heat").notNull(),
+  source: text("source").notNull().default("stream"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const leaderSkips = pgTable("leader_skips", {
+  slot: bigint("slot", { mode: "number" }).primaryKey(),
+  leader: text("leader").notNull(),
+});
+
+export const audits = pgTable("audits", {
+  address: text("address").primaryKey(),
+  data: jsonb("data").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const receipts = pgTable("receipts", {
@@ -52,8 +64,49 @@ export async function checkDb(): Promise<void> {
   }
 }
 
-export async function saveSlot(row: SlotStats): Promise<void> {
-  await db.insert(slotStats).values(row).onConflictDoUpdate({ target: slotStats.slot, set: { heat: row.heat, leader: row.leader } });
+export async function saveSlot(row: SlotStats, source: "stream" | "block" = "stream"): Promise<void> {
+  await db
+    .insert(slotStats)
+    .values({ ...row, source })
+    .onConflictDoUpdate({ target: slotStats.slot, set: { heat: row.heat, leader: row.leader } });
+}
+
+export function slotRows(slots: number[]) {
+  return slots.length ? db.select().from(slotStats).where(inArray(slotStats.slot, slots)) : Promise.resolve([]);
+}
+
+export async function saveSkip(slot: number, leader: string): Promise<void> {
+  await db.insert(leaderSkips).values({ slot, leader }).onConflictDoNothing();
+}
+
+export async function leaderStats(identities: string[]) {
+  const out = new Map<string, { slotsObserved: number; medianTip: number | null; probesLanded: number; skipped: number }>();
+  if (!identities.length) return out;
+  const { rows } = await db.execute<{ leader: string; slots: string; median: string | null; landed: string; skipped: string }>(sql`
+    select l.leader,
+      (select count(*) from slot_stats s where s.leader = l.leader and s.count > 0) as slots,
+      (select percentile_cont(0.5) within group (order by s.p50) from slot_stats s where s.leader = l.leader and s.count > 0) as median,
+      (select count(*) from receipts r join slot_stats s on s.slot = r.landed_slot where s.leader = l.leader and r.kind = 'probe') as landed,
+      (select count(*) from leader_skips k where k.leader = l.leader) as skipped
+    from unnest(array[${sql.join(identities.map((i) => sql`${i}`), sql`, `)}]::text[]) as l(leader)`);
+  for (const r of rows) {
+    out.set(r.leader, {
+      slotsObserved: Number(r.slots),
+      medianTip: r.median === null ? null : Math.round(Number(r.median)),
+      probesLanded: Number(r.landed),
+      skipped: Number(r.skipped),
+    });
+  }
+  return out;
+}
+
+export async function saveAudit(address: string, data: unknown): Promise<void> {
+  await db.insert(audits).values({ address, data }).onConflictDoUpdate({ target: audits.address, set: { data, updatedAt: new Date() } });
+}
+
+export async function loadAudit(address: string): Promise<unknown | null> {
+  const [row] = await db.select().from(audits).where(eq(audits.address, address));
+  return row?.data ?? null;
 }
 
 export interface ProbeFields {

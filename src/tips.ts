@@ -197,9 +197,9 @@ export function onConfirmed(slot: number): SlotStats | null {
   return stats;
 }
 
-// Rows for persistence and lag use the heat known now, since Blur events can
-// arrive after gRPC has confirmed the slot.
-export function finalizedRow(slot: number): SlotStats | null {
+// A confirmed slot's row with the heat known now: Blur events can arrive
+// after gRPC has confirmed the slot.
+export function confirmedRow(slot: number): SlotStats | null {
   const row = recent.find((r) => r.slot === slot);
   return row ? { ...row, heat: heatAt(slot) } : null;
 }

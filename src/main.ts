@@ -1,15 +1,18 @@
+import { PublicKey } from "@solana/web3.js";
+import { onWebhookPost, resumeWebhook, runAudit, watchWallet, webhookHealth } from "./audit.js";
 import { blurCounts, startBlur } from "./blur.js";
-import { bus, JITO_TIP_ACCOUNTS, LAG_INTERVAL_MS, requireApiKey } from "./config.js";
-import { checkDb, markLanded, probeRows, receiptBySignature, saveReceipt, saveSlot, type ProbeFields } from "./db.js";
+import { AUDIT_DEFAULT_LIMIT, AUDIT_MAX_LIMIT, bus, JITO_TIP_ACCOUNTS, LAG_INTERVAL_MS, requireApiKey } from "./config.js";
+import { checkDb, loadAudit, markLanded, probeRows, receiptBySignature, saveReceipt, saveSlot, type ProbeFields } from "./db.js";
 import { doctor } from "./doctor.js";
 import { startGrpc } from "./grpc.js";
+import { leaderOf, onFinalized, refreshLeaders, upcomingLeaders } from "./leaders.js";
 import * as lifecycle from "./lifecycle.js";
 import { raceSlot, raceStats, startMirage } from "./mirage.js";
 import { budgetState, loadProbes, probeOutcomes, probeRecords, probeSettled, startProbes } from "./probe.js";
 import { calibration, quote } from "./quote.js";
 import { HttpError, startServer } from "./server.js";
 import { beamTipAddresses, leaderNow } from "./solami.js";
-import { addHeat, addTip, finalizedRow, onConfirmed, refreshLag, tipState } from "./tips.js";
+import { addHeat, addTip, confirmedRow, onConfirmed, refreshLag, tipState, useLeaders } from "./tips.js";
 
 const RECENT_RECEIPTS = 20;
 const STATUS_EVERY_MS = 60_000;
@@ -26,6 +29,7 @@ async function serve(): Promise<void> {
   let behind = 0;
   const probeFields = new Map<string, ProbeFields>();
   const recent: lifecycle.Receipt[] = [];
+  useLeaders(leaderOf);
 
   const grpc = startGrpc(beamTips, {
     onSlot(slot, status) {
@@ -35,11 +39,13 @@ async function serve(): Promise<void> {
         if (slot > processed) {
           processed = slot;
           bus.emit("slot", { slot, chainTip, behind });
+          refreshLeaders(slot).catch((e: Error) => console.warn(`[leaders] ${e.message}`));
         }
       }
       if (status === "confirmed") onConfirmed(slot);
       if (status === "finalized") {
-        const row = finalizedRow(slot);
+        onFinalized(slot);
+        const row = confirmedRow(slot);
         if (row) saveSlot(row).catch((e: Error) => console.error(`[db] slot ${slot}: ${e.message}`));
       }
     },
@@ -49,7 +55,8 @@ async function serve(): Promise<void> {
   });
   const mirage = startMirage();
   const blur = startBlur(() => processed, addHeat);
-  const streams = () => [grpc, mirage, blur].map((s) => ({ ...s }));
+  await resumeWebhook();
+  const streams = () => [grpc, mirage, blur, webhookHealth()].filter((s) => s !== null).map((s) => ({ ...s }));
 
   bus.on("lifecycle", (r: lifecycle.Receipt) => {
     const i = recent.findIndex((x) => x.signature === r.signature);
@@ -142,8 +149,43 @@ async function serve(): Promise<void> {
       return row;
     },
     "GET /calibration": calibrationNow,
+    "GET /leaders": () => upcomingLeaders(Math.max(processed, chainTip)),
+    "POST /audit": ({ body }) => {
+      const { address, limit } = (body ?? {}) as { address?: unknown; limit?: unknown };
+      const n = limit === undefined ? AUDIT_DEFAULT_LIMIT : Number(limit);
+      if (!Number.isInteger(n) || n < 1 || n > AUDIT_MAX_LIMIT) throw new HttpError(400, `limit must be an integer from 1 to ${AUDIT_MAX_LIMIT}`);
+      return runAudit(validAddress(address), n);
+    },
+    "GET /audit/:address": async ({ params: [address] }) => {
+      const audit = await loadAudit(validAddress(address));
+      if (!audit) throw new HttpError(404, "no audit for this address yet; POST /audit first");
+      return audit;
+    },
+    "POST /audit/:address/watch": async ({ params: [address] }) => {
+      try {
+        return await watchWallet(validAddress(address));
+      } catch (e) {
+        throw e instanceof HttpError ? e : new HttpError(400, (e as Error).message);
+      }
+    },
+    "POST /webhooks/solami": async ({ raw, headers }) => {
+      try {
+        await onWebhookPost(raw, headers["x-webhook-signature"] as string | undefined);
+      } catch (e) {
+        throw new HttpError(401, (e as Error).message);
+      }
+      return { ok: true };
+    },
   });
   console.log(`[photon] region streams up; ${beamTips.length} Beam tip addresses; probes ${probeWallet ? "on" : "off (PROBE_SECRET not set)"}`);
+}
+
+function validAddress(value: unknown): string {
+  try {
+    return new PublicKey(String(value)).toBase58();
+  } catch {
+    throw new HttpError(400, "address must be a base58 Solana address");
+  }
 }
 
 const mode = process.argv[2];

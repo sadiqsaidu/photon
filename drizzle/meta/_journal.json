@@ -15,6 +15,13 @@
       "when": 1791406716497,
       "tag": "0001_receipts",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791407690129,
+      "tag": "0002_leaders_audits",
+      "breakpoints": true
     }
   ]
 }
