@@ -158,13 +158,18 @@ export function onBlockHeight(h: number): void {
 function settle(r: Receipt, failure: FailureClass | null): void {
   if (!active.delete(r.signature)) return;
   r.failure = failure;
-  r.settled = true;
   bus.emit("lifecycle", r);
+  // Settled only once the Beam landing record is attached, so a receipt read
+  // after settling is complete.
   setTimeout(() => {
     beamRecord(r.signature)
       .then((rec) => (r.beam = rec))
       .catch((e: Error) => console.warn(`[beam] record ${r.signature}: ${e.message}`))
-      .finally(() => onSettled(r));
+      .finally(() => {
+        r.settled = true;
+        bus.emit("lifecycle", r);
+        onSettled(r);
+      });
   }, failure === "send_rejected" ? 0 : BEAM_LOOKUP_DELAY_MS);
 }
 

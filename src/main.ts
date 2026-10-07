@@ -3,6 +3,7 @@ import { onWebhookPost, resumeWebhook, runAudit, watchWallet, webhookHealth } fr
 import { blurCounts, startBlur } from "./blur.js";
 import { AUDIT_DEFAULT_LIMIT, AUDIT_MAX_LIMIT, bus, JITO_TIP_ACCOUNTS, LAG_INTERVAL_MS, requireApiKey } from "./config.js";
 import { checkDb, loadAudit, markLanded, probeRows, receiptBySignature, saveReceipt, saveSlot, type ProbeFields } from "./db.js";
+import { demo } from "./demo.js";
 import { doctor } from "./doctor.js";
 import { startGrpc } from "./grpc.js";
 import { leaderOf, onFinalized, refreshLeaders, upcomingLeaders } from "./leaders.js";
@@ -144,9 +145,10 @@ async function serve(): Promise<void> {
     },
     "GET /receipt/:signature": async ({ params: [signature] }) => {
       const live = recent.find((r) => r.signature === signature) ?? lifecycle.activeReceipts().find((r) => r.signature === signature);
-      const row = live ?? (await receiptBySignature(signature as string));
+      if (live) return live;
+      const row = await receiptBySignature(signature as string);
       if (!row) throw new HttpError(404, "unknown signature");
-      return row;
+      return { ...row, settled: row.failure !== null || Boolean((row.stages as lifecycle.Receipt["stages"]).finalized) };
     },
     "GET /calibration": calibrationNow,
     "GET /leaders": () => upcomingLeaders(Math.max(processed, chainTip)),
@@ -193,6 +195,7 @@ const mode = process.argv[2];
 async function main(): Promise<void> {
   if (mode === "doctor") process.exit((await doctor()) ? 0 : 1);
   if (mode === "serve") return serve();
+  if (mode === "demo") return demo();
   throw new Error(`unknown mode "${mode ?? ""}". Use: serve | doctor | demo`);
 }
 
