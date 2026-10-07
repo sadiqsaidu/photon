@@ -6,10 +6,8 @@
     "esModuleInterop": true,
     "strict": true,
     "noUncheckedIndexedAccess": true,
-    "noImplicitOverride": true,
     "skipLibCheck": true,
-    "resolveJsonModule": true,
-    "outDir": "dist"
+    "noEmit": true
   },
-  "include": ["src", "test"]
+  "include": ["src", "test", "drizzle.config.ts"]
 }
