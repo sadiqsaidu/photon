@@ -39,16 +39,18 @@ const WARN_EVERY_MS = 30_000;
 // Solami replays at most 3,500 slots; past that a resume would be refused.
 const REPLAY_WINDOW_MS = 15 * 60_000;
 
-// Every transaction Photon sends carries a Beam tip, so the tip-account filter
-// also drives lifecycle tracking. `failed` is left unset: true would mean
-// failed transactions only, and failed_onchain needs both.
-function request(tipAccounts: string[], fromSlot: number): SubscribeRequest {
+// Every transaction Photon sends carries a Beam tip, so the tip filters also
+// drive lifecycle tracking. Successful transactions arrive in full (balances
+// give the tip); failed ones are needed only for Photon's own sends, so they
+// come as status-only updates and only for Beam tip addresses. In Yellowstone
+// `failed: true` means failed transactions only.
+function request(tipAccounts: string[], beamTips: string[], fromSlot: number): SubscribeRequest {
   return {
-    slots: { slots: { filterByCommitment: false } },
+    slots: { slots: { filterByCommitment: false, interslotUpdates: false } },
     blocksMeta: { blocks: {} },
-    transactions: { tips: { vote: false, accountInclude: tipAccounts, accountExclude: [], accountRequired: [] } },
+    transactions: { tips: { vote: false, failed: false, accountInclude: tipAccounts, accountExclude: [], accountRequired: [] } },
+    transactionsStatus: { beamFailed: { vote: false, failed: true, accountInclude: beamTips, accountExclude: [], accountRequired: [] } },
     accounts: {},
-    transactionsStatus: {},
     blocks: {},
     entry: {},
     accountsDataSlice: [],
@@ -118,12 +120,11 @@ export function startGrpc(beamTips: string[], h: GrpcHandlers): StreamHealth {
     const tx = u.transaction?.transaction;
     if (tx && u.transaction) {
       const slot = Number(u.transaction.slot);
-      h.onTx(bs58.encode(tx.signature), slot, Boolean(tx.meta?.err));
-      if (!tx.meta?.err) {
-        const tip = tipOf(tx, slot, jito, beam, prefixes);
-        if (tip) h.onTip(tip);
-      }
+      h.onTx(bs58.encode(tx.signature), slot, false);
+      const tip = tipOf(tx, slot, jito, beam, prefixes);
+      if (tip) h.onTip(tip);
     }
+    if (u.transactionStatus) h.onTx(bs58.encode(u.transactionStatus.signature), Number(u.transactionStatus.slot), true);
   };
 
   const work = (health: StreamHealth) => {
@@ -144,7 +145,7 @@ export function startGrpc(beamTips: string[], h: GrpcHandlers): StreamHealth {
   };
   const enqueue = (u: SubscribeUpdate, health: StreamHealth) => {
     q.depth = queue.length - head;
-    if (q.depth >= QUEUE_CAPACITY && u.transaction) {
+    if (q.depth >= QUEUE_CAPACITY && (u.transaction || u.transactionStatus)) {
       q.dropped++;
       return;
     }
@@ -186,7 +187,7 @@ export function startGrpc(beamTips: string[], h: GrpcHandlers): StreamHealth {
       stream.on("end", resolve);
       // Resume one slot early after a reconnect; tips are deduplicated by
       // signature and replayed slots update their rows in place.
-      stream.write(request(tipAccounts, resumeFrom), (err: Error | null | undefined) => {
+      stream.write(request(tipAccounts, beamTips, resumeFrom), (err: Error | null | undefined) => {
         if (err) reject(err);
         else {
           health.connected = true;

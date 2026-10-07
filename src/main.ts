@@ -59,7 +59,7 @@ async function serve(): Promise<void> {
   const mirage = startMirage();
   const blur = startBlur(() => processed, addHeat);
   await resumeWebhook();
-  const streams = () => [grpc, mirage, blur, webhookHealth()].filter((s) => s !== null).map((s) => ({ ...s }));
+  const streams = () => [grpc, mirage, ...blur, webhookHealth()].filter((s) => s !== null).map((s) => ({ ...s }));
 
   bus.on("lifecycle", (r: lifecycle.Receipt) => {
     const i = recent.findIndex((x) => x.signature === r.signature);
