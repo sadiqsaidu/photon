@@ -48,6 +48,9 @@ export interface StreamHealth {
   lastEventAt: number;
   bytes: number;
   error: string | null;
+  blocked: string | null;
+  backpressureClosures: number;
+  queue?: { depth: number; maxDepth: number; capacity: number; dropped: number };
 }
 
 export interface Calibration {
@@ -62,6 +65,7 @@ export interface Stats {
   slot: number;
   chainTip: number;
   behind: number;
+  maxBehind: number;
   streams: StreamHealth[];
   race: { wins: { grpc: number; mirage: number }; matched: number; grpcLeadP50Ms: number | null };
   blur: { counts: Record<string, number>; since: number };

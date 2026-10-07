@@ -8,7 +8,7 @@ import {
   JITO_TIP_ACCOUNTS,
   LAMPORTS_PER_SOL,
 } from "./config.js";
-import { loadAudit, saveAudit, saveSlot, slotRows } from "./db.js";
+import { loadAudit, saveAudit, saveSlots, slotRows } from "./db.js";
 import * as solami from "./solami.js";
 import { supervise, wsSession, type StreamHealth } from "./stream.js";
 import { confirmedRow, percentile, type SlotStats } from "./tips.js";
@@ -161,7 +161,7 @@ export async function blockStats(slot: number, tipAccounts: Set<string>): Promis
     slot, leader: null, count: tips.length, beamCount: 0, heat: 0,
     p25: percentile(tips, 25), p50: percentile(tips, 50), p75: percentile(tips, 75), p90: percentile(tips, 90), max: tips.at(-1) ?? 0,
   };
-  await saveSlot(row, "block");
+  await saveSlots([row], "block");
   return row;
 }
 
@@ -214,7 +214,9 @@ let hookStream: StreamHealth | null = null;
 async function fetchTx(signature: string): Promise<RpcTx | null> {
   for (let i = 0; i < 4; i++) {
     if (i) await new Promise((r) => setTimeout(r, 1_500));
-    const tx = await solami.rpc<RpcTx | null>("getTransaction", [signature, { encoding: "json", maxSupportedTransactionVersion: TX_VERSION, commitment: "confirmed" }]);
+    const tx = await solami
+      .rpc<RpcTx | null>("getTransaction", [signature, { encoding: "json", maxSupportedTransactionVersion: TX_VERSION, commitment: "confirmed" }])
+      .catch(() => null);
     if (tx) return tx;
   }
   return null;

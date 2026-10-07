@@ -21,34 +21,51 @@ function StreamPanel({ streams }: { streams: StreamHealth[] }) {
     }
     last.current = { at: now, bytes };
   }, [streams]);
+  const queue = streams.find((s) => s.queue)?.queue;
+  const blocked = streams.filter((s) => s.blocked);
   return (
     <section className="panel">
       <div className="title">
         <span className="label">stream health</span>
+        {queue && (
+          <span className={`tag ${queue.depth > queue.capacity / 2 ? "bad" : "good"}`}>
+            gRPC queue {queue.depth.toLocaleString("en-US")} (peak {queue.maxDepth.toLocaleString("en-US")} of {queue.capacity.toLocaleString("en-US")})
+          </span>
+        )}
       </div>
-      <table>
-        <thead>
-          <tr>
-            <th>stream</th>
-            <th>state</th>
-            <th className="r">MB/s</th>
-            <th className="r">reconnects</th>
-          </tr>
-        </thead>
-        <tbody>
-          {streams.map((s) => (
-            <tr key={s.name}>
-              <td>{s.name}</td>
-              <td>
-                <span className={`live ${s.connected ? "" : "down"}`} />
-                {s.connected ? "up" : s.error ?? "down"}
-              </td>
-              <td className="r">{rates[s.name] === undefined ? "-" : rates[s.name]?.toFixed(3)}</td>
-              <td className="r">{s.reconnects}</td>
+      {blocked.map((s) => (
+        <p key={s.name} className="tag bad" style={{ marginTop: 0 }}>
+          {s.name} refused by Solami: {s.blocked}. Serving stored data; retrying every 5 minutes.
+        </p>
+      ))}
+      <div className="scroll-x">
+        <table>
+          <thead>
+            <tr>
+              <th>stream</th>
+              <th>state</th>
+              <th className="r">MB/s</th>
+              <th className="r">reconnects</th>
+              <th className="r">backpressure closures</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {streams.map((s) => (
+              <tr key={s.name}>
+                <td>{s.name}</td>
+                <td>
+                  <span className={`live ${s.connected ? "" : "down"}`} />
+                  {s.connected ? "up" : s.blocked ? "refused" : "reconnecting"}
+                </td>
+                <td className="r">{rates[s.name] === undefined ? "-" : rates[s.name]?.toFixed(3)}</td>
+                <td className="r">{s.reconnects}</td>
+                <td className="r">{s.backpressureClosures}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {queue && queue.dropped > 0 && <p className="faint" style={{ margin: "8px 0 0", fontSize: 11 }}>{queue.dropped.toLocaleString("en-US")} transaction updates shed while the queue was full.</p>}
     </section>
   );
 }

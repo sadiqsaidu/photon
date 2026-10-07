@@ -64,11 +64,12 @@ export async function checkDb(): Promise<void> {
   }
 }
 
-export async function saveSlot(row: SlotStats, source: "stream" | "block" = "stream"): Promise<void> {
+export async function saveSlots(rows: SlotStats[], source: "stream" | "block" = "stream"): Promise<void> {
+  if (!rows.length) return;
   await db
     .insert(slotStats)
-    .values({ ...row, source })
-    .onConflictDoUpdate({ target: slotStats.slot, set: { heat: row.heat, leader: row.leader } });
+    .values(rows.map((r) => ({ ...r, source })))
+    .onConflictDoUpdate({ target: slotStats.slot, set: { heat: sql`excluded.heat`, leader: sql`excluded.leader` } });
 }
 
 export function slotRows(slots: number[]) {

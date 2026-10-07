@@ -196,10 +196,16 @@ export function onConfirmed(slot: number): SlotStats | null {
     heat: heatAt(slot),
   };
   samples.set(slot, tips.map((t) => ({ lamports: t.lamports, source: t.source })));
-  recent.push(stats);
-  if (stats.count > 0) {
-    f50.observe(stats.p50);
-    f90.observe(stats.p90);
+  // A from_slot replay confirms slots again: replace the row, observe once.
+  const existing = recent.findIndex((r) => r.slot === slot);
+  if (existing >= 0) recent[existing] = stats;
+  else {
+    recent.push(stats);
+    recent.sort((a, b) => a.slot - b.slot);
+    if (stats.count > 0) {
+      f50.observe(stats.p50);
+      f90.observe(stats.p90);
+    }
   }
   prune();
   const all: number[] = [], beam: number[] = [];

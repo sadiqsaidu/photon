@@ -2,7 +2,7 @@ import { PublicKey } from "@solana/web3.js";
 import { onWebhookPost, resumeWebhook, runAudit, watchWallet, webhookHealth } from "./audit.js";
 import { blurCounts, startBlur } from "./blur.js";
 import { AUDIT_DEFAULT_LIMIT, AUDIT_MAX_LIMIT, bus, JITO_TIP_ACCOUNTS, LAG_INTERVAL_MS, requireApiKey } from "./config.js";
-import { checkDb, latestReceipts, loadAudit, markLanded, probeRows, receiptBySignature, saveReceipt, saveSlot, type ProbeFields, type ReceiptRow } from "./db.js";
+import { checkDb, latestReceipts, loadAudit, markLanded, probeRows, receiptBySignature, saveReceipt, saveSlots, type ProbeFields, type ReceiptRow } from "./db.js";
 import { demo } from "./demo.js";
 import { doctor } from "./doctor.js";
 import { startGrpc } from "./grpc.js";
@@ -13,7 +13,7 @@ import { budgetState, loadProbes, probeOutcomes, probeRecords, probeSettled, sta
 import { calibration, quote } from "./quote.js";
 import { HttpError, startServer } from "./server.js";
 import { beamTipAddresses, leaderNow } from "./solami.js";
-import { addHeat, addTip, confirmedRow, onConfirmed, recentHeat, refreshLag, tipState, useLeaders } from "./tips.js";
+import { type SlotStats, addHeat, addTip, confirmedRow, onConfirmed, recentHeat, refreshLag, tipState, useLeaders } from "./tips.js";
 
 const RECENT_RECEIPTS = 20;
 const STATUS_EVERY_MS = 60_000;
@@ -28,6 +28,8 @@ async function serve(): Promise<void> {
   let processed = 0;
   let chainTip = 0;
   let behind = 0;
+  let maxBehind = 0;
+  const finalizedRows: SlotStats[] = [];
   const probeFields = new Map<string, ProbeFields>();
   const recent: lifecycle.Receipt[] = (await latestReceipts(RECENT_RECEIPTS)).map(asReceipt);
   useLeaders(leaderOf);
@@ -47,7 +49,7 @@ async function serve(): Promise<void> {
       if (status === "finalized") {
         onFinalized(slot);
         const row = confirmedRow(slot);
-        if (row) saveSlot(row).catch((e: Error) => console.error(`[db] slot ${slot}: ${e.message}`));
+        if (row) finalizedRows.push(row);
       }
     },
     onBlock: lifecycle.onBlock,
@@ -83,6 +85,11 @@ async function serve(): Promise<void> {
   );
 
   setInterval(refreshLag, LAG_INTERVAL_MS);
+  // Slot rows are written in one batched insert every couple of seconds.
+  setInterval(() => {
+    const rows = finalizedRows.splice(0);
+    saveSlots(rows).catch((e: Error) => console.error(`[db] ${rows.length} slot rows: ${e.message}`));
+  }, 2_000);
   // Blur events can land after a slot confirms, so recent heat is re-sent.
   setInterval(() => bus.emit("heat", recentHeat(40)), 2_000);
   setInterval(() => {
@@ -90,6 +97,7 @@ async function serve(): Promise<void> {
       (l) => {
         chainTip = l.slot;
         behind = Math.max(0, l.slot - processed);
+        if (processed && behind > maxBehind) maxBehind = behind;
       },
       (e: Error) => console.warn(`[leader-tracking] ${e.message}`),
     );
@@ -101,7 +109,8 @@ async function serve(): Promise<void> {
     const t = tipState();
     const race = raceStats();
     console.log(
-      `[status] slot ${processed} behind ${behind} | ${streams().map((s) => `${s.name} ${s.connected ? "up" : "down"}`).join(", ")} | ` +
+      `[status] slot ${processed} behind ${behind} (max ${maxBehind}) | grpc queue ${grpc.queue?.depth} (max ${grpc.queue?.maxDepth}, shed ${grpc.queue?.dropped}) | ` +
+        `${streams().map((s) => `${s.name} ${s.connected ? "up" : "down"} r${s.reconnects} bp${s.backpressureClosures}`).join(", ")} | ` +
         `quote samples ${t.samples}, beam floor at p${t.floorPercentile} | race grpc ${race.wins.grpc} mirage ${race.wins.mirage} | ` +
         `lag k=${t.lag.k} r=${t.lag.r} | probe budget left ${budgetState().leftLamports}`,
     );
@@ -120,11 +129,12 @@ async function serve(): Promise<void> {
     })));
 
   startServer({
-    "GET /health": () => ({ ok: streams().every((s) => s.connected), slot: processed, behind, streams: streams() }),
+    "GET /health": () => ({ ok: streams().every((s) => s.connected), slot: processed, behind, maxBehind, streams: streams() }),
     "GET /stats": () => ({
       slot: processed,
       chainTip,
       behind,
+      maxBehind,
       streams: streams(),
       race: raceStats(),
       blur: { counts: blurCounts, since: startedAt },

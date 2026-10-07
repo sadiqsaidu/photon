@@ -69,7 +69,15 @@ export function TopBar({ live }: { live: Live }) {
           "-"
         )}
       </Metric>
-      <Metric label="behind chain tip">{s ? `${s.behind} slots` : "-"}</Metric>
+      <Metric label="behind chain tip">
+        {s ? (
+          <>
+            {s.behind} slots <span className="muted">max {s.maxBehind}</span>
+          </>
+        ) : (
+          "-"
+        )}
+      </Metric>
       <Metric label="Blur events/s">{live.blurPerSec === null ? "-" : Math.round(live.blurPerSec).toLocaleString("en-US")}</Metric>
       <Metric label="Beam">
         {beam?.beam ? (
