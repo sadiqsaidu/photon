@@ -61,3 +61,22 @@ describe("calibration", () => {
     expect(c.brier).toBe(0.25);
   });
 });
+
+describe("tipForBucket", async () => {
+  const { tipForBucket, bucketOf } = await import("../src/probe.js");
+  const { rankOf } = await import("../src/tips.js");
+  // 40% of eligible tips sit exactly at the Beam floor, the rest spread above.
+  const sorted = [...Array(40).fill(100_000), ...Array.from({ length: 60 }, (_, i) => 110_000 + i * 10_000)];
+
+  it("returns a tip whose mid-rank falls inside the requested bucket", () => {
+    for (let b = 0; b < 5; b++) {
+      const t = tipForBucket(sorted, b);
+      expect(t).not.toBeNull();
+      expect(bucketOf(rankOf(sorted, t!.tip))).toBe(b);
+    }
+  });
+
+  it("uses the tie value itself for the bucket the tie covers", () => {
+    expect(tipForBucket(sorted, 0)!.tip).toBe(100_000);
+  });
+});

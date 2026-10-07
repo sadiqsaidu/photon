@@ -16,6 +16,7 @@ import {
   config,
   LAMPORTS_PER_SOL,
   MEMO_PROGRAM,
+  MIN_BUCKET_PROBES,
   PROBE_COMPUTE_UNIT_LIMIT,
   PROBE_COMPUTE_UNIT_PRICE,
   PROBE_MEMO,
@@ -43,6 +44,7 @@ interface ProbeRecord extends ProbeFields {
 const records = new Map<string, ProbeRecord>();
 let budget = Math.round(config.probeBudgetSol * LAMPORTS_PER_SOL);
 let stopped = false;
+let stopReason: string | null = null;
 
 // Probes still in flight when the server stopped get their outcome from
 // signature status; ones never seen stay out of calibration but count as spent.
@@ -106,7 +108,43 @@ export function spentLamports(): number {
 }
 
 export function budgetState() {
-  return { budgetLamports: budget, spentLamports: spentLamports(), leftLamports: Math.max(0, budget - spentLamports()), stopped };
+  return { budgetLamports: budget, spentLamports: spentLamports(), leftLamports: Math.max(0, budget - spentLamports()), stopped, stopReason };
+}
+
+export function bucketCounts(): number[] {
+  const counts = BUCKETS.map(() => 0);
+  for (const r of records.values()) if (r.calibrate && r.failure !== "send_rejected") counts[r.bucket]!++;
+  return counts;
+}
+
+// The tip whose mid-rank sits inside bucket `index`, closest to its middle.
+// Ties (many tips are exactly 100,000) can push a bucket's midpoint value
+// into a neighbour, so values just above each candidate are tried too.
+export function tipForBucket(sorted: number[], index: number): { tip: number; pct: number } | null {
+  const b = BUCKETS[index] as (typeof BUCKETS)[number];
+  const mid = (b.lo + b.hi) / 2;
+  let best: { tip: number; pct: number } | null = null;
+  for (let p = b.lo; p < b.hi; p += 0.5) {
+    const v = percentile(sorted, p);
+    for (const candidate of [v, v + 1]) {
+      const tip = Math.min(config.tipCeilingLamports, Math.max(BEAM_MIN_TIP, candidate));
+      const pct = rankOf(sorted, tip);
+      if (bucketOf(pct) !== index) continue;
+      if (!best || Math.abs(pct - mid) < Math.abs(best.pct - mid)) best = { tip, pct };
+    }
+  }
+  return best;
+}
+
+export function fillPlan(sorted: number[]) {
+  const counts = bucketCounts();
+  const buckets = BUCKETS.map((b, i) => {
+    const need = Math.max(0, MIN_BUCKET_PROBES - (counts[i] as number));
+    const target = tipForBucket(sorted, i);
+    return { lo: b.lo, hi: b.hi, have: counts[i] as number, need, tip: target?.tip ?? null, cost: target ? need * (target.tip + PROBE_FEE) : null };
+  });
+  const unreachable = buckets.filter((b) => b.need > 0 && b.tip === null).map((b) => `${b.lo}-${b.hi}`);
+  return { buckets, unreachable, costLamports: buckets.reduce((a, b) => a + (b.cost ?? 0), 0), probes: buckets.reduce((a, b) => a + b.need, 0) };
 }
 
 export function probeKeypair(): Keypair | null {
@@ -134,11 +172,18 @@ export function bucketOf(pct: number): number {
   return i === -1 ? BUCKETS.length - 1 : i;
 }
 
-async function sendProbe(payer: Keypair, slot: number, onSent: (r: Receipt, f: ProbeFields) => void): Promise<void> {
-  const target = BUCKETS[Math.floor(Math.random() * BUCKETS.length)] as (typeof BUCKETS)[number];
-  const sorted = distribution().sorted;
-  const tip = Math.min(config.tipCeilingLamports, Math.max(BEAM_MIN_TIP, percentile(sorted, (target.lo + target.hi) / 2)));
-  const pct = rankOf(sorted, tip);
+// Least-sampled bucket first, ties at random.
+function nextBucket(): number | null {
+  const counts = bucketCounts();
+  const open = counts.map((n, i) => ({ n, i })).filter((c) => c.n < MIN_BUCKET_PROBES);
+  if (!open.length) return null;
+  const least = Math.min(...open.map((c) => c.n));
+  const ties = open.filter((c) => c.n === least);
+  return (ties[Math.floor(Math.random() * ties.length)] as { i: number }).i;
+}
+
+async function sendProbe(payer: Keypair, slot: number, target: { tip: number; pct: number }, onSent: (r: Receipt, f: ProbeFields) => void): Promise<void> {
+  const { tip, pct } = target;
   const bucket = bucketOf(pct);
   const predicted = probabilities(probeOutcomes(), CALIBRATION_DEADLINE).p[bucket] as number;
   const recent = confirmedBlockhash() ?? (await rpc<{ value: { blockhash: string; lastValidBlockHeight: number } }>("getLatestBlockhash", [{ commitment: "confirmed" }])).value;
@@ -157,25 +202,45 @@ async function sendProbe(payer: Keypair, slot: number, onSent: (r: Receipt, f: P
   }
 }
 
+function stop(reason: string): void {
+  if (stopped) return;
+  stopped = true;
+  stopReason = reason;
+  console.log(`[probe] stopped: ${reason}`);
+  bus.emit("probe", { budget: budgetState() });
+}
+
+const WARMUP_MS = 45_000;
+
 export async function startProbes(slot: () => number, onSent: (r: Receipt, f: ProbeFields) => void): Promise<string | null> {
   const payer = probeKeypair();
   if (!payer) return null;
   const address = payer.publicKey.toBase58();
   const balance = (await rpc<{ value: number }>("getBalance", [address, { commitment: "confirmed" }])).value;
   budget = Math.min(budget, spentLamports() + Math.max(0, balance - RESERVE_LAMPORTS));
-  const tick = () => {
-    const maxCost = config.tipCeilingLamports + PROBE_FEE;
-    if (stopped || budgetState().leftLamports < maxCost) {
-      if (!stopped) console.log(`[probe] budget reached (${spentLamports()} of ${budget} lamports), probes stopped`);
-      stopped = true;
-      bus.emit("probe", { budget: budgetState() });
-      return clearInterval(timer);
-    }
-    if (distribution().sorted.length === 0 || !slot()) return;
-    sendProbe(payer, slot(), onSent).catch((e: Error) => console.error(`[probe] ${e.message}`));
-  };
-  const timer = setInterval(tick, config.probeIntervalSec * 1_000);
-  setTimeout(tick, 15_000);
   console.log(`[probe] wallet ${address}, balance ${balance} lamports, budget ${budget} lamports, every ${config.probeIntervalSec} s`);
+  let timer: NodeJS.Timeout | undefined;
+  const tick = () => {
+    if (stopped) return clearInterval(timer);
+    const index = nextBucket();
+    if (index === null) return stop(`every bucket has ${MIN_BUCKET_PROBES} probes`);
+    const target = tipForBucket(distribution().sorted, index);
+    if (!target) return stop(`bucket ${index} cannot be reached at the current distribution`);
+    if (budgetState().leftLamports < target.tip + PROBE_FEE) return stop(`budget reached (${spentLamports()} of ${budget} lamports)`);
+    sendProbe(payer, slot(), target, onSent).catch((e: Error) => console.error(`[probe] ${e.message}`));
+  };
+  // The fill plan needs a warm distribution; it gates probing before any send.
+  setTimeout(() => {
+    const plan = fillPlan(distribution().sorted);
+    const left = budgetState().leftLamports;
+    for (const b of plan.buckets) console.log(`[probe] plan p${b.lo}-${b.hi}: have ${b.have}, need ${b.need}, tip ${b.tip ?? "unreachable"}, cost ${b.cost ?? "-"}`);
+    console.log(`[probe] plan total: ${plan.probes} probes, ${plan.costLamports} lamports (${plan.costLamports / LAMPORTS_PER_SOL} SOL); budget left ${left} lamports`);
+    bus.emit("probe", { plan, budget: budgetState() });
+    if (plan.unreachable.length) return stop(`buckets ${plan.unreachable.join(", ")} cannot be reached at the current distribution`);
+    if (plan.probes === 0) return stop(`every bucket has ${MIN_BUCKET_PROBES} probes`);
+    if (plan.costLamports > left) return stop(`fill estimate ${plan.costLamports} exceeds budget left ${left}`);
+    tick();
+    timer = setInterval(tick, config.probeIntervalSec * 1_000);
+  }, WARMUP_MS);
   return address;
 }
