@@ -2,7 +2,7 @@ import { PublicKey } from "@solana/web3.js";
 import { onWebhookPost, resumeWebhook, runAudit, watchWallet, webhookHealth } from "./audit.js";
 import { blurCounts, startBlur } from "./blur.js";
 import { AUDIT_DEFAULT_LIMIT, AUDIT_MAX_LIMIT, bus, JITO_TIP_ACCOUNTS, LAG_INTERVAL_MS, requireApiKey } from "./config.js";
-import { checkDb, loadAudit, markLanded, probeRows, receiptBySignature, saveReceipt, saveSlot, type ProbeFields } from "./db.js";
+import { checkDb, latestReceipts, loadAudit, markLanded, probeRows, receiptBySignature, saveReceipt, saveSlot, type ProbeFields, type ReceiptRow } from "./db.js";
 import { demo } from "./demo.js";
 import { doctor } from "./doctor.js";
 import { startGrpc } from "./grpc.js";
@@ -13,7 +13,7 @@ import { budgetState, loadProbes, probeOutcomes, probeRecords, probeSettled, sta
 import { calibration, quote } from "./quote.js";
 import { HttpError, startServer } from "./server.js";
 import { beamTipAddresses, leaderNow } from "./solami.js";
-import { addHeat, addTip, confirmedRow, onConfirmed, refreshLag, tipState, useLeaders } from "./tips.js";
+import { addHeat, addTip, confirmedRow, onConfirmed, recentHeat, refreshLag, tipState, useLeaders } from "./tips.js";
 
 const RECENT_RECEIPTS = 20;
 const STATUS_EVERY_MS = 60_000;
@@ -29,7 +29,7 @@ async function serve(): Promise<void> {
   let chainTip = 0;
   let behind = 0;
   const probeFields = new Map<string, ProbeFields>();
-  const recent: lifecycle.Receipt[] = [];
+  const recent: lifecycle.Receipt[] = (await latestReceipts(RECENT_RECEIPTS)).map(asReceipt);
   useLeaders(leaderOf);
 
   const grpc = startGrpc(beamTips, {
@@ -83,6 +83,8 @@ async function serve(): Promise<void> {
   );
 
   setInterval(refreshLag, LAG_INTERVAL_MS);
+  // Blur events can land after a slot confirms, so recent heat is re-sent.
+  setInterval(() => bus.emit("heat", recentHeat(40)), 2_000);
   setInterval(() => {
     leaderNow().then(
       (l) => {
@@ -148,7 +150,7 @@ async function serve(): Promise<void> {
       if (live) return live;
       const row = await receiptBySignature(signature as string);
       if (!row) throw new HttpError(404, "unknown signature");
-      return { ...row, settled: row.failure !== null || Boolean((row.stages as lifecycle.Receipt["stages"]).finalized) };
+      return asReceipt(row);
     },
     "GET /calibration": calibrationNow,
     "GET /leaders": () => upcomingLeaders(Math.max(processed, chainTip)),
@@ -180,6 +182,24 @@ async function serve(): Promise<void> {
     },
   });
   console.log(`[photon] region streams up; ${beamTips.length} Beam tip addresses; probes ${probeWallet ? "on" : "off (PROBE_SECRET not set)"}`);
+}
+
+function asReceipt(row: ReceiptRow): lifecycle.Receipt {
+  const stages = row.stages as lifecycle.Receipt["stages"];
+  return {
+    signature: row.signature,
+    kind: row.kind as lifecycle.Receipt["kind"],
+    sentSlot: row.sentSlot,
+    lastValidBlockHeight: null,
+    tip: row.tip,
+    stages,
+    landedSlot: row.landedSlot,
+    failure: row.failure as lifecycle.FailureClass | null,
+    error: row.error,
+    beam: row.beam as lifecycle.Receipt["beam"],
+    settled: row.failure !== null || row.landedSlot !== null || Boolean(stages.finalized),
+    sentAt: row.createdAt.getTime(),
+  };
 }
 
 function validAddress(value: unknown): string {

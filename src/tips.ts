@@ -154,6 +154,19 @@ export function addHeat(slot: number, weight: number): void {
   heat.set(slot, (heat.get(slot) ?? 0) + weight);
 }
 
+const DOTS_PER_SLOT = 12;
+
+// An even spread of one slot's landed tips, for the dashboard scatter.
+export function dotsOf(slot: number): number[] {
+  const values = (samples.get(slot) ?? []).map((t) => t.lamports).sort((a, b) => a - b);
+  if (values.length <= DOTS_PER_SLOT) return values;
+  return Array.from({ length: DOTS_PER_SLOT }, (_, i) => values[Math.round((i * (values.length - 1)) / (DOTS_PER_SLOT - 1))] as number);
+}
+
+export function recentHeat(n: number): [number, number][] {
+  return recent.slice(-n).map((r) => [r.slot, heatAt(r.slot)]);
+}
+
 export function heatAt(slot: number): number {
   return heat.get(slot) ?? 0;
 }
@@ -193,7 +206,7 @@ export function onConfirmed(slot: number): SlotStats | null {
   for (const list of samples.values()) for (const t of list) (t.source === "beam" ? beam : all).push(t.lamports);
   const combined = all.concat(beam).sort((a, b) => a - b);
   sorted = { all: combined, beam: beam.sort((a, b) => a - b), eligible: combined.filter((v) => v >= BEAM_MIN_TIP) };
-  bus.emit("tips", stats);
+  bus.emit("tips", { ...stats, dots: dotsOf(slot) });
   return stats;
 }
 
@@ -240,11 +253,16 @@ export function forecastAt(pct: number, h: number): number {
   return Math.round(base * growth * heatMultiplier());
 }
 
+// Per-slot series projection, the dashed lines past "now" on the dashboard.
+function projected(f: ReturnType<typeof holt>, h: number): number {
+  return Math.round((f.level() ?? 0) * f.growth(h) * heatMultiplier());
+}
+
 export function tipState() {
   const d = distribution();
   return {
     lastConfirmed,
-    window: recent.slice(-150),
+    window: recent.slice(-150).map((r) => ({ ...r, heat: heatAt(r.slot), dots: dotsOf(r.slot) })),
     lag,
     heatMultiplier: heatMultiplier(),
     source: d.source,
@@ -252,6 +270,6 @@ export function tipState() {
     allSamples: sorted.all.length,
     beamSamples: sorted.beam.length,
     floorPercentile: floorPercentile(),
-    forecast: Array.from({ length: 10 }, (_, i) => ({ h: i + 1, p50: forecastAt(50, i + 1), p90: forecastAt(90, i + 1) })),
+    forecast: Array.from({ length: 10 }, (_, i) => ({ h: i + 1, p50: projected(f50, i + 1), p90: projected(f90, i + 1) })),
   };
 }

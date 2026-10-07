@@ -144,6 +144,10 @@ export async function markLanded(signature: string, landedSlot: number, failed: 
   await db.update(receipts).set({ landedSlot, failure: failed ? "failed_onchain" : null }).where(eq(receipts.signature, signature));
 }
 
+export function latestReceipts(n: number): Promise<ReceiptRow[]> {
+  return db.select().from(receipts).orderBy(desc(receipts.createdAt)).limit(n);
+}
+
 export function probeRows(): Promise<ReceiptRow[]> {
   return db.select().from(receipts).where(eq(receipts.kind, "probe")).orderBy(desc(receipts.createdAt));
 }
