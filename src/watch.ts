@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { analyze, summarize, tipSet, TX_VERSION, type Audit, type RpcTx } from "./audit.js";
-import { bus, config, LEGACY_LABELS, WEBHOOK_LABEL } from "./config.js";
+import { bus, config, LEGACY_LABELS, WATCH_TTL_MS, WEBHOOK_LABEL } from "./config.js";
 import { loadAudit, saveAudit, slotRows } from "./db.js";
 import * as solami from "./solami.js";
 import { supervise, wsSession, type StreamHealth } from "./stream.js";
@@ -18,6 +18,7 @@ const LIVE_TXS = 1_000;
 const SEEN_KEEP = 20_000;
 
 const live = new Map<string, Audit>();
+const watchedUntil = new Map<string, number>();
 const dirty = new Set<string>();
 const seen = new Set<string>();
 const queue: solami.WebhookEvent[] = [];
@@ -94,8 +95,10 @@ setInterval(() => {
 function startHookStream(): void {
   if (hookStream || !hook) return;
   const id = hook.id;
-  hookStream = supervise("webhooks", (health, signal) =>
-    wsSession(solami.webhookStreamUrl(id), health, signal, (data) => enqueue(JSON.parse(data.toString()) as solami.WebhookEvent)),
+  hookStream = supervise(
+    "webhooks",
+    (health, signal) => wsSession(solami.webhookStreamUrl(hook?.id ?? id), health, signal, (data) => enqueue(JSON.parse(data.toString()) as solami.WebhookEvent)),
+    () => hook !== null,
   );
 }
 
@@ -117,6 +120,7 @@ export async function resumeWebhook(): Promise<void> {
   for (const address of hook?.addresses ?? []) {
     const audit = (await loadAudit(address)) as Audit | null;
     if (audit) live.set(address, { ...audit, watching: true });
+    watchedUntil.set(address, Date.now() + WATCH_TTL_MS);
   }
   startHookStream();
 }
@@ -134,10 +138,34 @@ export async function watchWallet(address: string) {
   }
   const audit = { ...((await loadAudit(address)) as Audit), watching: true };
   live.set(address, audit);
+  watchedUntil.set(address, Date.now() + WATCH_TTL_MS);
   await saveAudit(address, audit);
   startHookStream();
-  return { address, webhookId: hook.id, delivery: url ? "stream+post" : "stream" };
+  return { address, until: watchedUntil.get(address), delivery: url ? "stream+post" : "stream" };
 }
+
+// Expired wallets leave the webhook; Solami refuses an empty address list, so
+// the last one deletes the webhook and the stream idles until the next watch.
+async function expireWatches(): Promise<void> {
+  const now = Date.now();
+  const expired = [...watchedUntil].filter(([, until]) => until < now).map(([a]) => a);
+  if (!expired.length || !hook) return;
+  const keep = hook.addresses.filter((a) => !expired.includes(a));
+  if (keep.length) hook = await solami.webhookUpdate({ id: hook.id, addresses: keep });
+  else {
+    await solami.webhookDelete(hook.id);
+    hook = null;
+  }
+  for (const address of expired) {
+    watchedUntil.delete(address);
+    const audit = live.get(address);
+    live.delete(address);
+    if (audit) await saveAudit(address, { ...audit, watching: false });
+  }
+  console.log(`[webhooks] stopped watching ${expired.length} wallet(s); ${keep.length} left`);
+}
+
+setInterval(() => expireWatches().catch((e: Error) => console.error(`[webhooks] expire: ${e.message}`)), 60_000).unref();
 
 // POST delivery only. The signature is assumed to be a hex HMAC-SHA256 of the
 // raw body (unverified: Solami documents "an HMAC of the body").

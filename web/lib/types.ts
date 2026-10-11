@@ -179,6 +179,7 @@ export interface AuditTx {
   priorityFee: number;
   slotP25: number | null;
   slotP50: number | null;
+  slotP75?: number | null;
   overpay: number;
   underpaid: boolean;
 }

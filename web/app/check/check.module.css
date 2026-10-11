@@ -1,0 +1,24 @@
+.intro {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: var(--gutter);
+  padding: 64px 0 24px;
+}
+
+.copy {
+  grid-column: 1 / span 7;
+  display: grid;
+  gap: 20px;
+}
+
+.form {
+  grid-column: 1 / span 8;
+  margin-top: 24px;
+}
+
+@media (max-width: 900px) {
+  .intro {
+    display: block;
+    padding-top: 32px;
+  }
+}

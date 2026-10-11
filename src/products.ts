@@ -111,7 +111,7 @@ export async function products(ctx: ProductContext) {
     {
       id: "webhooks",
       name: "Webhooks",
-      status: hooks ? streamStatus(hooks) : refused("webhooks") ? "refused" : "idle",
+      status: refused("webhooks") ? "refused" : hooks && watchedCount() > 0 ? streamStatus(hooks) : "idle",
       job: "Streams new transactions of watched wallets onto their receipts.",
       metric: `${watchedCount()} ${watchedCount() === 1 ? "wallet" : "wallets"} watched live`,
       values: { watched: watchedCount() },

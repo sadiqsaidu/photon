@@ -130,6 +130,8 @@ export const DEMO_IP_COOLDOWN_MS = 3 * 60_000;
 export const AUDIT_PER_MINUTE = 6;
 export const WATCH_PER_MINUTE = 3;
 export const AUDIT_REUSE_MS = 60_000;
+// Live watching ends by itself so busy wallets do not pile up on the webhook.
+export const WATCH_TTL_MS = 15 * 60_000;
 
 // Wallet checkup stamps: share of tips above the going rate, share too low.
 export const STAMP_OVERPAID_SHARE = 0.3;

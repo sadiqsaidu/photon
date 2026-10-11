@@ -20,6 +20,9 @@ export function streamError(message: string, kind: { blocked?: boolean; backpres
   return Object.assign(new Error(message), kind);
 }
 
+// A refusal right after a restart is often the old connection still counted
+// against the stream limit, so the first retries come sooner.
+const BLOCKED_FIRST_RETRY_MS = 30_000;
 const BLOCKED_RETRY_MS = 300_000;
 
 type Session = (health: StreamHealth, signal: AbortSignal) => Promise<void>;
@@ -28,11 +31,18 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // Runs one session after another forever: reconnects with exponential backoff
 // plus jitter, and aborts a session that goes silent (half-open sockets).
-export function supervise(name: string, session: Session): StreamHealth {
+// `active` pauses the stream without a session while it returns false.
+export function supervise(name: string, session: Session, active: () => boolean = () => true): StreamHealth {
   const health: StreamHealth = { name, connected: false, reconnects: 0, lastEventAt: 0, bytes: 0, error: null, blocked: null, backpressureClosures: 0 };
   void (async () => {
     let backoff = 500;
+    let blockedBackoff = BLOCKED_FIRST_RETRY_MS;
     for (;;) {
+      if (!active()) {
+        health.connected = false;
+        await sleep(2_000);
+        continue;
+      }
       const ctrl = new AbortController();
       const startedAt = Date.now();
       health.lastEventAt = startedAt;
@@ -56,7 +66,9 @@ export function supervise(name: string, session: Session): StreamHealth {
       health.reconnects++;
       health.blocked = blocked ? health.error : null;
       if (health.lastEventAt - startedAt > 5_000) backoff = 500;
-      const delay = blocked ? BLOCKED_RETRY_MS : Math.round(backoff + Math.random() * backoff * 0.5);
+      if (!blocked) blockedBackoff = BLOCKED_FIRST_RETRY_MS;
+      const delay = blocked ? blockedBackoff : Math.round(backoff + Math.random() * backoff * 0.5);
+      if (blocked) blockedBackoff = Math.min(blockedBackoff * 2, BLOCKED_RETRY_MS);
       console.warn(`[${name}] ${blocked ? "refused by Solami: " : ""}${health.error}; reconnecting in ${delay} ms`);
       bus.emit("stream", { ...health });
       await sleep(delay);

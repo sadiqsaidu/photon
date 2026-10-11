@@ -45,6 +45,7 @@ export interface AuditTx {
   priorityFee: number;
   slotP25: number | null;
   slotP50: number | null;
+  slotP75: number | null;
   overpay: number;
   underpaid: boolean;
 }
@@ -78,6 +79,7 @@ export function analyze(tx: RpcTx, wallet: string, tipAccounts: Set<string>, ben
     priorityFee: Math.max(0, (tx.meta?.fee ?? 0) - BASE_FEE_PER_SIGNATURE * tx.transaction.signatures.length),
     slotP25,
     slotP50,
+    slotP75: b && b.count > 0 ? b.p75 : null,
     overpay: tip > 0 && slotP50 !== null ? Math.max(0, tip - slotP50) : 0,
     underpaid: tip > 0 && slotP25 !== null && tip < slotP25,
   };

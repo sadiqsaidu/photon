@@ -146,7 +146,7 @@ console.log(receipt.failure ?? `landed in slot ${receipt.landedSlot}`, receipt.s
 | `GET /leaders` | Next 20 slots of leaders with slots seen, median tip, probes landed, skipped slots. |
 | `POST /audit` | Body `{ "address", "limit" }` (limit 1 to 300, default 100). Runs and stores an audit; the same address within 60 s returns the stored one. 6 per minute per IP. |
 | `GET /audit/:address` | The stored audit. |
-| `POST /audit/:address/watch` | Adds the wallet to the live webhook stream. 3 per minute per IP. |
+| `POST /audit/:address/watch` | Adds the wallet to the live webhook stream for 15 minutes. 3 per minute per IP. |
 | `POST /webhooks/solami` | HTTP webhook delivery (only when `WEBHOOK_PUBLIC_URL` is set). |
 
 The Solami key never leaves the server.
