@@ -27,7 +27,7 @@ Tipwise reads every tip that gets a transaction into every block, straight from 
 
 **Check a wallet.** Paste any wallet, or pick one of the bots that tipped most in the last 10 minutes. Tipwise reads its last 100 transactions and prints a receipt: tips paid, the going rate in the same blocks, what was paid above it, how many tips were too low to compete, and a stamp (OVERPAID, FAIR or TOO LOW). "Watch this wallet live" prints new trades onto the receipt as they land.
 
-![A wallet checkup receipt stamped OVERPAID: a bot with a fixed tip far above the going rate, and its trade by trade strip](docs/screenshots/check.png)
+![A wallet checkup receipt stamped OVERPAID: a live bot that paid $2.24 in tips, $2.21 of it above the going rate](docs/screenshots/check.png)
 
 **Send a test.** Pick a fare and press "Send a test for me": Tipwise sends a real mainnet transaction through Beam from its own wallet, and you watch it travel from sent to finalized. Or send from your own wallet (Phantom, Solflare, Backpack) for the price of the tip. Either way you get a ticket with the promise check and a plain explanation.
 
@@ -224,9 +224,10 @@ Production run of the hosted instance (Solami region ams), October 11, 2026.
 | --- | --- |
 | Hosted site | https://tipwise.tech |
 | Hosted API | https://api.tipwise.tech (try `/health`, `/fares`, `/calibration`) |
-| Test trips | 31 sent, 31 landed through Beam, every one within 2 blocks (last 30: 18 in 1 block, 12 in 2) |
-| Calibration | Complete: every reachable bucket has 10 probes. Brier score 0.133 against a 2 block deadline (the starting estimates were cautious; every trip landed). |
-| Lag result | No lead: best correlation r = 0.087 at k = 10 blocks over 874 blocks, below the 0.2 threshold, so the forecast does not use heat. |
+| Test trips | 40 sent, 40 landed through Beam, 39 within 2 blocks and one in 3 (last 30: 15 in 1 block, 14 in 2, 1 in 3) |
+| Calibration | Complete: every reachable bucket has 10 probes. Brier score 0.126 against a 2 block deadline (the starting estimates were cautious: 39 of 40 trips landed within 2 blocks). |
+| Fares at the time of writing | Saver 10 blocks: 125,000 lamports, 92%; Standard 4 blocks: 125,000 lamports, 92%; Express 1 block: 125,000 lamports, 67% (best effort). At 1 block the pricier buckets did not land faster (tips of 500,000 lamports and up landed in 1 block less often than tips near the Beam floor), so Express quotes the cheapest tip with its real chance. |
+| Lag result | No lead: best correlation r = 0.067 at k = 3 blocks over 887 blocks, below the 0.2 threshold, so the forecast does not use heat. |
 | Solami products | All eight live at the time of writing (Yellowstone gRPC, Mirage, Blur, Beam, RPC, Data API, Webhooks, Leader tracking). |
 
 Calibration per bucket:
@@ -236,24 +237,17 @@ Calibration per bucket:
 | p0 to p25 | 10 | 0.5 | 1 | 0.917 | reachable |
 | p25 to p50 | 10 | 0.65 | 1 | 0.917 | reachable |
 | p50 to p75 | 10 | 0.8 | 1 | 0.917 | reachable |
-| p75 to p90 | 1 | 0.9 | 1 | 0.917 | above tip ceiling |
+| p75 to p90 | 10 | 0.9 | 0.9 | 0.917 | reachable |
 | p90 to p100 | 0 |  |  | 0.917 | above tip ceiling |
 
 Production sends (all through Beam via Solami RPC):
 
 | Kind | Signature | Tip (lamports) | Blocks to land | Beam record |
 | --- | --- | --- | --- | --- |
+| free test send (Standard) | [om7YZR33...dttzjQ](https://solscan.io/tx/om7YZR339PZQghJMBKHU8MqERfHKkeWZmqj7Gmp4mDRjeNH26TJLabqCWinnBFb6CaXbs78PnFFLnNSbgdttzjQ) | 108,955 | 1 | landed, ams |
+| free test send (Express) | [4NVyB4cK...6VnCXE](https://solscan.io/tx/4NVyB4cK2iacFwkQcVLqouvTykWfNq9TyF6xG59K9h6i7pLXWn1P8ZvqmRWMp7bxk9bibBBS6UYLrwXjnn6VnCXE) | 1,000,000 | 1 | landed, ams |
 | free test send (Standard) | [5EHzvLSo...SG2U4R](https://solscan.io/tx/5EHzvLSo8dk6wwm5WW2FpqpRytJgdY4JF5KVkHY178ArMMKPFfJVfkFVHcsWQcAR8nNGqJgK3keAN9VPQJSG2U4R) | 108,726 | 1 | landed, ams |
 | free test send (Standard) | [2z52gGMM...WouMey](https://solscan.io/tx/2z52gGMM9HsuCB7xgeA857o6SD4VzdDY9aUFfvvUwqxh4tUjeYcmnNwizW86vbe4oYKCzyF1FzZ3BMgWVbWouMey) | 109,000 | 2 | landed, ams |
-| test trip | [5kzMmDnk...1hA2Lq](https://solscan.io/tx/5kzMmDnkYbpMJbhdVuVjrEqCSeo7cyjefkZE4qdMMZ6YyyLYBPx2BEnbwckLunpbEPHg4sND1UYeGKoUAH1hA2Lq) | 100,001 | 2 | landed, ams |
-| test trip | [63EtuPyp...h9erGo](https://solscan.io/tx/63EtuPypg2pjunynitRLjxRGhMuK4U1amgxV7NJzq54VRz5mSw2UiUWyhLYkW8RJmwZyrqHMTsBLXjnGaUh9erGo) | 200,000 | 1 | landed, ams |
-| test trip | [287MBJSE...BnfxTn](https://solscan.io/tx/287MBJSEaU2MvAMjqHVCZmoGpkj2ecLdmMhj82sBs19SmtJxzmaa3qAUNS46UXgqYBFGe28qiApJFxr3GtBnfxTn) | 100,001 | 2 | landed, ams |
-| test trip | [5XhFrE64...23oqCR](https://solscan.io/tx/5XhFrE64WcFtzAthF1Usavta8SVbPfEMbM4G1jp9cVhWS1MCrY9LHc3Mh2x7wSSzNjfvSaKiyardLedm7p23oqCR) | 640,000 | 1 | landed, ams |
-| test trip | [5zntcuab...cWCXp6](https://solscan.io/tx/5zntcuab6NLPcPkTyYHp3DphSN4JoS6cpjeksZ7PQuZbZLX55vfFt17bgQfjN1tQna1osho22gbfTgi6KxcWCXp6) | 189,043 | 1 | landed, ams |
-| test trip | [5sFffpwk...4H5NQY](https://solscan.io/tx/5sFffpwksFqA7kYVe7wgkcaQrFtfbvkY6PfoCV8BRxgySZx1mBDrEmE13C3EBVTed4fV2QtDGdruqKZtrC4H5NQY) | 980,001 | 2 | landed, ams |
-| test trip | [25dvhHU2...x9R4rc](https://solscan.io/tx/25dvhHU2GTDcsNYW4BBeVd1GcjAZwPwsig5nHzQvobgwr53pvPdRaGzrZv7DMkFmXNQSfsVi5bknFV3PrNx9R4rc) | 200,001 | 1 | landed, ams |
-| test trip | [2PE25cMb...CPoa2s](https://solscan.io/tx/2PE25cMb1iYmTRV5Bgm3DhcYXPoec939AY2ZTGm2JxnMtd7LDGbKWXL4y2seEiuiixwiyjmcUybRv9juSRCPoa2s) | 100,001 | 1 | landed, ams |
-| test trip | [4QrCFPX4...ufddeU](https://solscan.io/tx/4QrCFPX4Tf37X4HG2hH8fz1TnJMFXgeaQxe4Hahtd4Eoy6zrjmhVTpot4fSjbvdQjgLjV6vPBKjUUzaTbmufddeU) | 100,000 | 1 | landed, ams |
 | test trip | [4zNQHaFA...2Bshab](https://solscan.io/tx/4zNQHaFAXcVGfo9esnaKoaiEEBaaZJcH2FuqoiQfteCTCQsJKkTLLUFMZXbRReWrjNjuhJ3QKYEa2Xawpa2Bshab) | 200,001 | 1 | landed, ams |
 | test trip | [2ketwm4z...nASMqy](https://solscan.io/tx/2ketwm4zCLg9acFUyFfA8gEaEm4wdhA1zHfkjo6samrHUw74ySwdp6epbJahUFBr5gGbttNm4auuwRHbn5nASMqy) | 954,000 | 2 | landed, ams |
 | test trip | [2b2QFpvT...AJaKXY](https://solscan.io/tx/2b2QFpvTMLH9jgZKoG7A2j8UpBCFxhricQP4fSNam24Y9YdSF2WTds4FbxUnm8xEUC3RAT8KYC5CoDQj8WAJaKXY) | 100,000 | 1 | landed, ams |
@@ -275,6 +269,15 @@ Production sends (all through Beam via Solami RPC):
 | test trip | [2xi3eoZV...9nmSxV](https://solscan.io/tx/2xi3eoZVstkAcRB2G4nmTMporyyufRbC2TEeAQt2Bb74ESp841Xe1Yb5RcfVdmfuVY4ThKpUjnMjcpVmoE9nmSxV) | 905,001 | 2 | landed, ams |
 | test trip | [5gSE7ysD...Scg3mg](https://solscan.io/tx/5gSE7ysD2wPozMfUBnHWiASqGEu8b6k6EgsbpWsy7AtwtfYHxfrJ2unn9sa1RtdsrUMu9UcN661Sv2UMypScg3mg) | 202,425 | 2 | landed, ams |
 | test trip | [ywbZrNTo...WtkAYt](https://solscan.io/tx/ywbZrNTo5svrajwM2iEcP3ARnXBr55he88Ap1UxLwZvVPyBzXsYF51igJTZN2TxmYdHTW6eCPVq5ZXKSVWtkAYt) | 101,980 | 2 | landed, ams |
+| test trip | [331rdwWH...p3voj9](https://solscan.io/tx/331rdwWHaxLKkAcMCRgDc5RVvv6UkvmFdjebsEcHsn69ShjQnM4fYWwGwLuoHXbFSTm7zpmPvR2WZn9JVSp3voj9) | 1,000,000 | 3 | landed, ams |
+| test trip | [218KM7ru...Fk7QsX](https://solscan.io/tx/218KM7ruwaD2Bc2WhxHnXASe9CLYJwi4wS5RgE6oR8PvYkJhefnYu6sWWbrxL8tXUrBi2ssZCGaRBWwmNFFk7QsX) | 1,000,000 | 1 | landed, ams |
+| test trip | [5evG1uos...aYN7h8](https://solscan.io/tx/5evG1uosyENxsXHZLkLnNCLt8dGZrBWhJAR7fKug4tM61D4s4wykRbzT5gACrKiJKeWykkfjbZ21qb7EZEaYN7h8) | 1,000,000 | 2 | landed, ams |
+| test trip | [3Z5U1nPy...mRwxMT](https://solscan.io/tx/3Z5U1nPyd1LG6rjotsNbRfRtP4XUG3KZTLkyHQxkH7HAEtbzhDB8NpeccfkeHLffLHwjXQ8D84rVhY5iRzmRwxMT) | 1,000,000 | 2 | landed, ams |
+| test trip | [4Cy9hpkr...FpZYJY](https://solscan.io/tx/4Cy9hpkrLJ7KWypDdDnYe8TkkJQmeiaQcTMCWsDWGBH633vxEF3ZbnMwaadNqYWHionAnpxttQf6rbEFhyFpZYJY) | 1,000,000 | 2 | landed, ams |
+| test trip | [YzfVxFzo...ZJCzgf](https://solscan.io/tx/YzfVxFzo7Ut95q1pbczKeDRmLaRm2SY9rcHw58ZbkSbAkMv6vD9jsfqR7mkZZXA8PCEvdUvJiFrcLNeZaZJCzgf) | 1,000,000 | 2 | landed, ams |
+| test trip | [5Gp9xSiq...Qe3mr4](https://solscan.io/tx/5Gp9xSiqJRhhXPUxVwmkKYQQn5nJZyBCAgUkHXPMkPvGKXH2oKburnA9citSthQqjvH6WYzcmbL9pjvSEnQe3mr4) | 1,000,000 | 2 | landed, ams |
+| test trip | [GLDUhsD3...zqMimJ](https://solscan.io/tx/GLDUhsD3919t9PJmmWx2r8eH8oTuUbziWFfsMp2nAeGoDmimMiA2na7weogH64PQArteDNS4HZPfBLGFTzqMimJ) | 1,000,000 | 1 | landed, ams |
+| test trip | [5iGreonE...ubMnZt](https://solscan.io/tx/5iGreonEADD1vvmQw6bccD9vtiDVHJVQ9CsPAy7JN98fX3z4xku1DXqvciHwLnTSNfvoTG9KmmLZMdG9HsubMnZt) | 1,000,000 | 1 | landed, ams |
 
 Additional proof from development (October 7, 2026, region ams, all sent through Beam via Solami RPC):
 

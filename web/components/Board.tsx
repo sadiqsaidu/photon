@@ -47,7 +47,8 @@ export function samePriceLine(fares: Fare[], calibrated: boolean): string | null
   if (!saver || !standard || !express) return null;
   const floor = calibrated && saver.meetsConfidence;
   const cause = floor ? "Quiet market: the cheapest tip is landing fast" : "A bigger tip would not raise the chance right now";
-  if (saver.tipLamports === standard.tipLamports && standard.tipLamports === express.tipLamports) return `${cause}, so all three fares cost the same right now.`;
+  if (saver.tipLamports === standard.tipLamports && standard.tipLamports === express.tipLamports)
+    return `${cause}, so all three fares cost the same right now.${express.meetsConfidence ? "" : " A bigger tip would not make Express any faster."}`;
   if (saver.tipLamports === standard.tipLamports) return `${cause}, so Standard costs the same as Saver right now.`;
   if (standard.tipLamports === express.tipLamports) return `${floor ? cause : "Paying more would not make it land faster right now"}, so Express costs the same as Standard right now.`;
   return null;
