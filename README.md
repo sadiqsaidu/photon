@@ -2,8 +2,8 @@
 
 **The going rate to get into the next Solana block.** Tipwise watches every tip that lands in every block, live, tells you what to pay, sends your transaction through Solami Beam, and hands you a receipt that proves when it landed.
 
-- **Live site:** LIVE_SITE_URL
-- **API:** LIVE_API_URL
+- **Live site:** https://tipwise.tech
+- **API:** https://api.tipwise.tech
 - **Demo video:** DEMO_VIDEO_URL
 
 ![The Tipwise live board: Saver, Standard and Express fares on a split-flap board, with every landed tip drifting past below](docs/screenshots/home.png)
@@ -218,16 +218,63 @@ The Solami key never leaves the server.
 
 ## Mainnet proof
 
-To be filled from the hosted instance after the live run:
+Production run of the hosted instance (Solami region ams), October 11, 2026.
 
 | What | Value |
 | --- | --- |
-| Hosted site | `TODO: site URL` |
-| Hosted API | `TODO: API URL` |
-| Probe signatures (hosted run) | `TODO: list with Solscan links` |
-| Demo signature (hosted run) | `TODO` |
-| Lag result | `TODO: best k and r over 900 slots` |
-| Calibration | `TODO: per bucket predicted vs actual, Brier score, probe count` |
+| Hosted site | https://tipwise.tech |
+| Hosted API | https://api.tipwise.tech (try `/health`, `/fares`, `/calibration`) |
+| Test trips | 31 sent, 31 landed through Beam, every one within 2 blocks (last 30: 18 in 1 block, 12 in 2) |
+| Calibration | Complete: every reachable bucket has 10 probes. Brier score 0.133 against a 2 block deadline (the starting estimates were cautious; every trip landed). |
+| Lag result | No lead: best correlation r = 0.087 at k = 10 blocks over 874 blocks, below the 0.2 threshold, so the forecast does not use heat. |
+| Solami products | All eight live at the time of writing (Yellowstone gRPC, Mirage, Blur, Beam, RPC, Data API, Webhooks, Leader tracking). |
+
+Calibration per bucket:
+
+| Bucket (tips Beam accepts) | Probes | Predicted at send | Landed within 2 blocks | Model now | Status |
+| --- | --- | --- | --- | --- | --- |
+| p0 to p25 | 10 | 0.5 | 1 | 0.917 | reachable |
+| p25 to p50 | 10 | 0.65 | 1 | 0.917 | reachable |
+| p50 to p75 | 10 | 0.8 | 1 | 0.917 | reachable |
+| p75 to p90 | 1 | 0.9 | 1 | 0.917 | above tip ceiling |
+| p90 to p100 | 0 |  |  | 0.917 | above tip ceiling |
+
+Production sends (all through Beam via Solami RPC):
+
+| Kind | Signature | Tip (lamports) | Blocks to land | Beam record |
+| --- | --- | --- | --- | --- |
+| free test send (Standard) | [5EHzvLSo...SG2U4R](https://solscan.io/tx/5EHzvLSo8dk6wwm5WW2FpqpRytJgdY4JF5KVkHY178ArMMKPFfJVfkFVHcsWQcAR8nNGqJgK3keAN9VPQJSG2U4R) | 108,726 | 1 | landed, ams |
+| free test send (Standard) | [2z52gGMM...WouMey](https://solscan.io/tx/2z52gGMM9HsuCB7xgeA857o6SD4VzdDY9aUFfvvUwqxh4tUjeYcmnNwizW86vbe4oYKCzyF1FzZ3BMgWVbWouMey) | 109,000 | 2 | landed, ams |
+| test trip | [5kzMmDnk...1hA2Lq](https://solscan.io/tx/5kzMmDnkYbpMJbhdVuVjrEqCSeo7cyjefkZE4qdMMZ6YyyLYBPx2BEnbwckLunpbEPHg4sND1UYeGKoUAH1hA2Lq) | 100,001 | 2 | landed, ams |
+| test trip | [63EtuPyp...h9erGo](https://solscan.io/tx/63EtuPypg2pjunynitRLjxRGhMuK4U1amgxV7NJzq54VRz5mSw2UiUWyhLYkW8RJmwZyrqHMTsBLXjnGaUh9erGo) | 200,000 | 1 | landed, ams |
+| test trip | [287MBJSE...BnfxTn](https://solscan.io/tx/287MBJSEaU2MvAMjqHVCZmoGpkj2ecLdmMhj82sBs19SmtJxzmaa3qAUNS46UXgqYBFGe28qiApJFxr3GtBnfxTn) | 100,001 | 2 | landed, ams |
+| test trip | [5XhFrE64...23oqCR](https://solscan.io/tx/5XhFrE64WcFtzAthF1Usavta8SVbPfEMbM4G1jp9cVhWS1MCrY9LHc3Mh2x7wSSzNjfvSaKiyardLedm7p23oqCR) | 640,000 | 1 | landed, ams |
+| test trip | [5zntcuab...cWCXp6](https://solscan.io/tx/5zntcuab6NLPcPkTyYHp3DphSN4JoS6cpjeksZ7PQuZbZLX55vfFt17bgQfjN1tQna1osho22gbfTgi6KxcWCXp6) | 189,043 | 1 | landed, ams |
+| test trip | [5sFffpwk...4H5NQY](https://solscan.io/tx/5sFffpwksFqA7kYVe7wgkcaQrFtfbvkY6PfoCV8BRxgySZx1mBDrEmE13C3EBVTed4fV2QtDGdruqKZtrC4H5NQY) | 980,001 | 2 | landed, ams |
+| test trip | [25dvhHU2...x9R4rc](https://solscan.io/tx/25dvhHU2GTDcsNYW4BBeVd1GcjAZwPwsig5nHzQvobgwr53pvPdRaGzrZv7DMkFmXNQSfsVi5bknFV3PrNx9R4rc) | 200,001 | 1 | landed, ams |
+| test trip | [2PE25cMb...CPoa2s](https://solscan.io/tx/2PE25cMb1iYmTRV5Bgm3DhcYXPoec939AY2ZTGm2JxnMtd7LDGbKWXL4y2seEiuiixwiyjmcUybRv9juSRCPoa2s) | 100,001 | 1 | landed, ams |
+| test trip | [4QrCFPX4...ufddeU](https://solscan.io/tx/4QrCFPX4Tf37X4HG2hH8fz1TnJMFXgeaQxe4Hahtd4Eoy6zrjmhVTpot4fSjbvdQjgLjV6vPBKjUUzaTbmufddeU) | 100,000 | 1 | landed, ams |
+| test trip | [4zNQHaFA...2Bshab](https://solscan.io/tx/4zNQHaFAXcVGfo9esnaKoaiEEBaaZJcH2FuqoiQfteCTCQsJKkTLLUFMZXbRReWrjNjuhJ3QKYEa2Xawpa2Bshab) | 200,001 | 1 | landed, ams |
+| test trip | [2ketwm4z...nASMqy](https://solscan.io/tx/2ketwm4zCLg9acFUyFfA8gEaEm4wdhA1zHfkjo6samrHUw74ySwdp6epbJahUFBr5gGbttNm4auuwRHbn5nASMqy) | 954,000 | 2 | landed, ams |
+| test trip | [2b2QFpvT...AJaKXY](https://solscan.io/tx/2b2QFpvTMLH9jgZKoG7A2j8UpBCFxhricQP4fSNam24Y9YdSF2WTds4FbxUnm8xEUC3RAT8KYC5CoDQj8WAJaKXY) | 100,000 | 1 | landed, ams |
+| test trip | [3Hos92CW...eNSKYV](https://solscan.io/tx/3Hos92CWmjQjWHoXTAGti5vVAguT3qBSqWNw5z156m6ZmTNd6K4gvmr7aL6YeDQXPchi26dnsjiMXwWuhdeNSKYV) | 500,001 | 2 | landed, ams |
+| test trip | [4vfv5Sh1...TyLB3z](https://solscan.io/tx/4vfv5Sh1ouQoPSKNNL3j4GDY9VArFjn3o1Zm66qdTkAnNmZSbXvoRfG4jonjAMtv3FaAajyPwnu27RxybNTyLB3z) | 171,580 | 1 | landed, ams |
+| test trip | [3G4NCrga...wAhieS](https://solscan.io/tx/3G4NCrga14YaCrKJ7QWf77ZKuJj6iqDA8m9rnP97bZKnqFuMUTqkvmjCGdt9mEwtbfWvPfe9gZuYsEsf9awAhieS) | 995,001 | 2 | landed, ams |
+| test trip | [2j9UqDrY...tN9fsh](https://solscan.io/tx/2j9UqDrYinvFh4y2aRTHD8RUEL54Fs3WSHJqRVdnadRf7fQXtNALEsRpQ6PSD4UM1zSAD7vCUBqQ3nUAGEtN9fsh) | 200,001 | 2 | landed, ams |
+| test trip | [4isSmrFJ...YxefiE](https://solscan.io/tx/4isSmrFJzHpk2466zJrUZcniNecEqTKG6NWMYCwssPwqSpfD8geUHRHeR6Yi2KwukqtsH5DzZ5zi4m4XXxYxefiE) | 100,001 | 1 | landed, ams |
+| test trip | [4ccd64Mk...fosx2d](https://solscan.io/tx/4ccd64MkZB6W8JimiEF2EPXt81pLDJkEestX3DfaqhNpgNbpA562Tvi4wXzkC91cbTumtUmdpjWKiSXxjTfosx2d) | 100,000 | 1 | landed, ams |
+| test trip | [3ym9eWP3...f17NBU](https://solscan.io/tx/3ym9eWP3PBYYHdvANZTUHMjoKs5RZTLsQWchMuLiu9JzK7EasxoSjeBF8oneEi8DbyyHGQTkXq9wKXbbYXf17NBU) | 709,100 | 1 | landed, ams |
+| test trip | [UafUER8k...Dwx3v8](https://solscan.io/tx/UafUER8k7SWsYcBvTm6khBegETpJkYDt5JNeR2KshyB4wkdSicbu5Kfri1LBhYFUGrN36NmXGiP8TZviCDwx3v8) | 200,000 | 1 | landed, ams |
+| test trip | [52FPS3NS...SPQpTs](https://solscan.io/tx/52FPS3NSVgvr8MFcxFESkz8mnniYH4xXq8t1wiQPdZnTYAcJdP7CY2Ke9NhgvC28tqeKcscj62QW6feQnnSPQpTs) | 100,000 | 1 | landed, ams |
+| test trip | [4UQoJGTf...RqwrVR](https://solscan.io/tx/4UQoJGTfBhVabHoULQCxuMcaptdCtrCEeHUvgecnFHWbGfiSuUxxtq1ydxP2mt1gJjTnGy2gEeWStE7X8URqwrVR) | 931,218 | 1 | landed, ams |
+| test trip | [4L3Mf6Jy...bmzkpj](https://solscan.io/tx/4L3Mf6JyYFSsespRKTEoh29TiTdfsWjmU8KEHMGYsPKtuH7ifEBnExrBFPcuv2BxBCw3gHVH2uoNyE1zEpbmzkpj) | 156,751 | 1 | landed, ams |
+| test trip | [5nQTZdZd...XYexSc](https://solscan.io/tx/5nQTZdZdqvvmSmE9JBuyMwgfdiqw5jqqDQ9mzHaonAr5C7i4Pxycm123MNgrrpL57quwaKa8eTbz6Kjj71XYexSc) | 128,711 | 2 | landed, ams |
+| test trip | [2voNUtgA...fVjubu](https://solscan.io/tx/2voNUtgADeEvfvxiESnjvScGzmEt7k7SqpTPVqvEAsuBGyP9y43UdeaMhYfCn1uE5nZpmbUhSCR4jfKQqkfVjubu) | 1,000,000 | 1 | landed, ams |
+| test trip | [2L9vA95u...vg3dHr](https://solscan.io/tx/2L9vA95uk94rjejdoArEkQAGXpChMoVbGs6TGejwaNTh2Mo5KUAyMMMHzmQ8xLn6Z8xuFNmEKhMpviFcrUvg3dHr) | 500,001 | 2 | landed, ams |
+| test trip | [yjudW5u5...4V1JQ7](https://solscan.io/tx/yjudW5u5aHJZAUpGg8FxaRXbq5nmp1y349kiyHgighhNQwhHU1JQzDK5ZCDKd2aeACZerdjdXpeaBBhvr4V1JQ7) | 100,001 | 1 | landed, ams |
+| test trip | [2xi3eoZV...9nmSxV](https://solscan.io/tx/2xi3eoZVstkAcRB2G4nmTMporyyufRbC2TEeAQt2Bb74ESp841Xe1Yb5RcfVdmfuVY4ThKpUjnMjcpVmoE9nmSxV) | 905,001 | 2 | landed, ams |
+| test trip | [5gSE7ysD...Scg3mg](https://solscan.io/tx/5gSE7ysD2wPozMfUBnHWiASqGEu8b6k6EgsbpWsy7AtwtfYHxfrJ2unn9sa1RtdsrUMu9UcN661Sv2UMypScg3mg) | 202,425 | 2 | landed, ams |
+| test trip | [ywbZrNTo...WtkAYt](https://solscan.io/tx/ywbZrNTo5svrajwM2iEcP3ARnXBr55he88Ap1UxLwZvVPyBzXsYF51igJTZN2TxmYdHTW6eCPVq5ZXKSVWtkAYt) | 101,980 | 2 | landed, ams |
 
 Additional proof from development (October 7, 2026, region ams, all sent through Beam via Solami RPC):
 

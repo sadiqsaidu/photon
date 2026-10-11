@@ -75,6 +75,21 @@ function Dumbbell({ data }: { data: TR }) {
   );
 }
 
+// Which way the gap goes matters: cautious starting estimates that the trips
+// beat read very differently from promises the trips missed.
+function verdict(data: TR, now: number | null): string {
+  if (data.trips === 0) return "No test trips have settled yet. The first ones go out a minute after the server starts.";
+  const used = data.rows.filter((r) => r.n > 0 && r.promised !== null && r.delivered !== null);
+  const total = used.reduce((a, r) => a + r.n, 0) || 1;
+  const promised = used.reduce((a, r) => a + r.n * (r.promised as number), 0) / total;
+  const delivered = used.reduce((a, r) => a + r.n * (r.delivered as number), 0) / total;
+  const trips = `${number(data.trips)} test trips`;
+  if (delivered - promised > 0.05)
+    return `We under-promised. Across ${trips}, Tipwise promised ${pct(promised)} on average and ${pct(delivered)} landed on time: the starting estimates were cautious.${now === null ? "" : ` With every price range tested, the board now promises ${pct(now)}.`}`;
+  if (promised - delivered > 0.05) return `We over-promised. Across ${trips}, Tipwise promised ${pct(promised)} on average and only ${pct(delivered)} landed on time.`;
+  return `Across ${trips}, we were within ${data.averageGapPoints ?? 0} points of what we promised on average.`;
+}
+
 function Stub({ r, price }: { r: Receipt; price: number | null }) {
   const landed = r.landedSlot !== null && r.failure === null;
   const n = r.landedSlot === null ? null : Math.max(1, r.landedSlot - r.sentSlot);
@@ -138,9 +153,7 @@ export function TrackRecordView() {
               </p>
             </div>
             <p className={s.summary}>
-              {data.trips === 0
-                ? "No test trips have settled yet. The first ones go out a minute after the server starts."
-                : `Across ${number(data.trips)} test trips, we were within ${data.averageGapPoints ?? 0} points of what we promised on average.`}{" "}
+              {verdict(data, fares?.fares.find((f) => f.id === "standard")?.probability ?? null)}{" "}
               {fares?.calibrated
                 ? "Predictions are checked: every price range Tipwise quotes has at least 10 test trips."
                 : progress
