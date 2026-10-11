@@ -30,7 +30,7 @@ Backend (`src/`, TypeScript strict ESM, run with tsx in development and compiled
 | `doctor.ts` | `npm run doctor`: checks every Solami product. |
 | `main.ts` | Modes (`serve`, `doctor`, `demo`) and the wiring of streams, probes and storage. |
 
-Other: `drizzle/` (SQL migrations, applied at startup), `test/` (vitest: quote, forecast and lag, audit math, failure classes), `render.yaml`, `docker-compose.yml` (local Postgres), `web/` (Next.js dashboard: `app/page.tsx` weather, `app/audit/page.tsx` audit, `components/` six panels, `lib/events.ts` SSE hook and state, `lib/format.ts`).
+Other: `drizzle/` (SQL migrations, applied at startup), `test/` (vitest: quote, forecast and lag, audit math, failure classes, fares, mood, explanations, rate limiter), `Dockerfile`, `docker-compose.prod.yml` and `deploy/Caddyfile` (production), `docker-compose.yml` (local Postgres), `web/` (Next.js dashboard: `app/page.tsx` weather, `app/audit/page.tsx` audit, `components/` six panels, `lib/events.ts` SSE hook and state, `lib/format.ts`).
 
 ## Verified Solami endpoints and shapes
 
@@ -71,11 +71,10 @@ WebSocket close codes: 4029 stream limit, 4002 bandwidth and balance empty, 1001
 
 ## Deployment
 
-- **API:** Render free web service in Frankfurt from `render.yaml`. Build `npm ci --include=dev && npm run build`, start `npm start` (runs `node dist/main.js serve`), health check `/health`. Migrations run at startup.
-- **Database:** Supabase Postgres (free), Session pooler URL with `?sslmode=require`. Retention keeps 3 days of `slot_stats` and 200 audits (watched ones always kept).
-- **Dashboard:** Vercel, root directory `web`, `NEXT_PUBLIC_API_BASE` set to the Render URL.
-- **Environment variable names (values live only in the host):** `SOLAMI_API_KEY`, `SOLAMI_REGION`, `DATABASE_URL`, `PORT` (set by Render), `PROBE_SECRET`, `PROBE_INTERVAL_SEC`, `PROBE_BUDGET_SOL`, `PROBE_LIMIT`, `TIP_CEILING_LAMPORTS`, `AUDIT_MAX_BLOCKS`, `WEBHOOK_PUBLIC_URL`, and for the web app `NEXT_PUBLIC_API_BASE`.
-- Render free instances sleep after 15 minutes without requests (ping `/health` to keep them up) and have 0.1 CPU.
+- **API and database:** one Azure B2s VM (West Europe, `SOLAMI_REGION=ams`) running `docker-compose.prod.yml`: Postgres 16, the API image from `Dockerfile`, and Caddy for HTTPS on `API_DOMAIN`. Steps are in the README's Deploy section.
+- **Frontend:** Vercel, root directory `web`, `NEXT_PUBLIC_API_BASE` set to the API URL.
+- **Environment variable names (values live only on the host):** `SOLAMI_API_KEY`, `SOLAMI_REGION`, `PROBE_SECRET`, `PROBE_INTERVAL_SEC`, `PROBE_BUDGET_SOL`, `PROBE_LIMIT`, `TIP_CEILING_LAMPORTS`, `AUDIT_MAX_BLOCKS`, `WEBHOOK_PUBLIC_URL`, `ADMIN_TOKEN`, `DEMO_DAILY_MAX`, `ALLOWED_ORIGINS`, `API_DOMAIN`, `POSTGRES_PASSWORD`, and for the web app `NEXT_PUBLIC_API_BASE`.
+- On startup the API deletes the Mirage subscription and webhook left from before the rename (labels in `LEGACY_LABELS`) and uses `tipwise-slots` and `tipwise-audit`.
 
 ## Current decisions
 
@@ -84,7 +83,7 @@ WebSocket close codes: 4029 stream limit, 4002 bandwidth and balance empty, 1001
 - Probes: least-sampled reachable bucket first; the whole run is simulated and gated on budget before the first send; `PROBE_LIMIT` caps one process.
 - Blur heat counts swaps of $100 or more (about 0.11 MB/s instead of 0.7).
 - gRPC: successful tip transactions in full, failed ones only as status for Beam tip addresses, `interslotUpdates: false`.
-- Region default `ams` (fastest median `getSlot` from the development sandbox; Render Frankfurt should use `fra`).
+- Region default `ams` (fastest median `getSlot` from the development sandbox).
 - Dashboard: heat on its own aligned strip, not a second y-axis.
 
 ## Status at handoff (October 7, 2026)
@@ -92,7 +91,7 @@ WebSocket close codes: 4029 stream limit, 4002 bandwidth and balance empty, 1001
 - All phases are on `claude/wonderful-gates-h1nwcp`. `npm run typecheck`, `npm test` (32 tests) and the web typecheck pass.
 - `npm run doctor` passes every check with the development key.
 - 10 minute verification of the compiled server (`npm start`, `PROBE_LIMIT=3`): gRPC 1.67 MB/s, Blur swaps 0.09 MB/s, Blur events 0.001 MB/s, Mirage 0.001 MB/s, webhooks 0.013 MB/s; max 1 slot behind chain tip; gRPC queue peak 1 of 50,000, nothing shed; 0 backpressure closures; one routine reconnect on Blur events; 3 probes landed through Beam (+2, +4, +5 slots).
-- CPU and memory: about 21% of one core and about 280 MB RSS with the heap capped (no watched wallets). Watching a busy bot wallet adds roughly a third more CPU (about 27 `getTransaction` calls per second). Render's free 0.1 CPU is not enough; use a 0.5 CPU instance or a small VM.
+- CPU and memory: about 21% of one core and about 280 MB RSS with the heap capped (no watched wallets). Watching a busy bot wallet adds roughly a third more CPU (about 27 `getTransaction` calls per second). A host with 0.1 CPU is not enough; production runs on a B2s VM.
 - Probes: 22 sent in total, 21 landed; calibrated buckets so far p0 to 25: 5, p25 to 50: 6, p50 to 75: 8 (10 each needed). Landed spend 4,558,892 lamports; the budget counter, which also counts the one probe of unknown outcome, shows 4,863,912 spent of 24,000,000.
 - The Phase 4 test webhook (watching a high-frequency bot) was deleted to save CPU; the next "watch live" recreates it.
 - The Mainnet proof table in the README has placeholders for the hosted run.
@@ -101,5 +100,4 @@ WebSocket close codes: 4029 stream limit, 4002 bandwidth and balance empty, 1001
 
 - With a 2 slot deadline most probes land in 3 to 6 slots, so the model learns that high confidence is not reachable at these tips; a longer default deadline may suit the product better.
 - Heat has not shown a reliable lead in measured windows.
-- Render free (0.1 CPU) may be too small for the gRPC workload; watch queue depth and slots behind in `/health`.
 - Ideas: a per-leader tip model (some leaders may need less), Beam-only quotes once Beam tips are common, a `getTransfersForAddress` audit path when Solami ships it, ShredStream for earlier slot signals, exporting receipts as CSV.

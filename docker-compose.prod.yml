@@ -1,0 +1,52 @@
+name: tipwise
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tipwise
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tipwise}
+      POSTGRES_DB: tipwise
+    volumes:
+      - tipwise-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tipwise"]
+      interval: 5s
+      retries: 20
+
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://tipwise:${POSTGRES_PASSWORD:-tipwise}@db:5432/tipwise
+      PORT: "8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    logging:
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - api
+
+volumes:
+  tipwise-pg:
+  caddy-data:
+  caddy-config:

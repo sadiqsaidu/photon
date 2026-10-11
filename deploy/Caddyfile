@@ -1,0 +1,8 @@
+{$API_DOMAIN} {
+	@compressible not path /events
+	encode @compressible zstd gzip
+
+	reverse_proxy api:8080 {
+		flush_interval -1
+	}
+}

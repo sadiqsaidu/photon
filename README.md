@@ -79,6 +79,11 @@ Beam over RPC needs no separate swQoS key. Put the key in `SOLAMI_API_KEY` and p
 | `TIP_CEILING_LAMPORTS` | no | `1000000` | Highest tip Tipwise will quote or probe. |
 | `AUDIT_MAX_BLOCKS` | no | `40` | Max `getBlock` calls per audit for slots without stored stats. |
 | `WEBHOOK_PUBLIC_URL` | no | | Public base URL of this server. When set, webhooks also POST to `/webhooks/solami` (HMAC verified). |
+| `ADMIN_TOKEN` | no | | Bearer token for `GET /admin/probe` (probe budget, spend, wallet). Unset: that route answers 404. |
+| `DEMO_DAILY_MAX` | no | `40` | Server-paid test sends ("Send a test for me") per UTC day. They share the probe budget. |
+| `ALLOWED_ORIGINS` | no | `*` | Comma separated origins allowed by CORS. |
+| `API_DOMAIN` | prod | | Hostname Caddy serves and gets a certificate for (`docker-compose.prod.yml`). |
+| `POSTGRES_PASSWORD` | no | `tipwise` | Password of the production Postgres container. |
 | `NEXT_PUBLIC_API_BASE` | web | `http://localhost:8080` | Backend URL for the dashboard (`web/.env.local`). |
 
 ## Run modes
@@ -125,17 +130,23 @@ console.log(receipt.failure ?? `landed in slot ${receipt.landedSlot}`, receipt.s
 | Method and path | Returns |
 | --- | --- |
 | `GET /health` | Stream health (connected, bytes, reconnects, backpressure closures, queue depth), slots behind and the maximum, degraded features. In memory, cheap. |
-| `GET /events` | Server-sent events: `slot`, `tips`, `heat`, `lag`, `quote`, `probe`, `lifecycle`, `stream`, `audit`. Heartbeat every 15 s. |
-| `GET /stats` | Snapshot for the dashboard's first paint. |
+| `GET /events` | Server-sent events: `slot`, `tips`, `heat`, `lag`, `quote`, `fares` (at most every 2 s, on change), `products` (every 5 s), `probe`, `lifecycle` (with `explanation`), `stream`, `audit`. Heartbeat every 15 s. |
+| `GET /stats` | Snapshot for the first paint: 600 slot window, mood, fares, SOL price, Solami products, calibration, track record, recent receipts. |
+| `GET /fares` | Saver, Standard and Express: `{ id, label, deadlineSlots, deadlineMs, confidence, tipLamports, tipSol, tipUsd, priorityFeeMicroLamports, probability, meetsConfidence }`, plus `calibrated`, `progress`, `samples`, `solPriceUsd`, `mood`, `updatedAt`. |
+| `GET /track-record` | Promise versus reality per price range at the Standard deadline (each test trip scored against the model built from earlier trips), and the latest test trips. |
+| `GET /audit/examples` | The 3 wallets that tipped most often in the last 10 minutes (live from gRPC). |
+| `GET /blockhash` | `{ blockhash, lastValidBlockHeight }` from the confirmed stream, so a browser needs no RPC key. |
+| `POST /demo/send` | Body `{ "fare" }`. Tipwise sends one tipped transaction from its own wallet. Limits: one every 20 s globally, one per IP every 3 minutes, `DEMO_DAILY_MAX` per day, the probe budget. Over a limit: 429 `{ error, retryAfterSec, reason }`. |
+| `GET /admin/probe` | Probe budget state. Only with `authorization: Bearer <ADMIN_TOKEN>`; otherwise 404. |
 | `GET /quote?deadline=2&confidence=0.9` | Tip, priority fee, probability, `meetsConfidence`, `calibrated`, per-bucket status. |
 | `GET /tips/addresses` | Beam tip addresses and Jito tip accounts. |
-| `POST /send` | Body `{ "tx": "<base64 signed transaction>" }`. Returns `{ "signature" }`. The transaction must carry at least 100,000 lamports to a Beam tip address. |
-| `GET /receipt/:signature` | Stages with slot and ms, landed slot, failure class, Beam landing record, `settled`. |
+| `POST /send` | Body `{ "tx": "<base64 signed transaction>", "fare"? }`. Returns `{ "signature" }`. The transaction must carry at least 100,000 lamports to a Beam tip address. With a fare, the receipt records the promise. |
+| `GET /receipt/:signature` | Stages with slot and ms, landed slot, failure class, Beam landing record, `settled`, `kind`, `fare`, `quotedProbability`, `deadlineSlots`, `sentAt`, and a plain English `explanation`. |
 | `GET /calibration` | Per bucket predicted vs actual, model probability, status, Brier score. |
 | `GET /leaders` | Next 20 slots of leaders with slots seen, median tip, probes landed, skipped slots. |
-| `POST /audit` | Body `{ "address", "limit" }` (limit 1 to 300, default 100). Runs and stores an audit. |
+| `POST /audit` | Body `{ "address", "limit" }` (limit 1 to 300, default 100). Runs and stores an audit; the same address within 60 s returns the stored one. 6 per minute per IP. |
 | `GET /audit/:address` | The stored audit. |
-| `POST /audit/:address/watch` | Adds the wallet to the live webhook stream. |
+| `POST /audit/:address/watch` | Adds the wallet to the live webhook stream. 3 per minute per IP. |
 | `POST /webhooks/solami` | HTTP webhook delivery (only when `WEBHOOK_PUBLIC_URL` is set). |
 
 The Solami key never leaves the server.
@@ -173,7 +184,7 @@ To be filled from the hosted instance after the live run:
 | What | Value |
 | --- | --- |
 | Hosted dashboard | `TODO: Vercel URL` |
-| Hosted API | `TODO: Render URL` |
+| Hosted API | `TODO: API URL` |
 | Probe signatures (hosted run) | `TODO: list with Solscan links` |
 | Demo signature (hosted run) | `TODO` |
 | Lag result | `TODO: best k and r over 900 slots` |
@@ -231,19 +242,59 @@ Three earlier probes (EqKpkPk8..., 44nHNaWu..., jJLJr9b2...) were sent while the
 
 ## Deploy
 
-The backend needs long-lived gRPC and WebSocket connections, so it runs as a web service, not as serverless functions.
+The backend holds long-lived gRPC and WebSocket connections and needs about 0.2 of a CPU core sustained, so it runs on a small VM, not on serverless functions or a free web service. The frontend is static and runs on Vercel.
 
-**Postgres on Supabase (free).** Create a project in Frankfurt and copy the Session pooler connection string (IPv4; the direct connection is IPv6 only). Append `?sslmode=require`. Tipwise migrates the schema at startup and prunes itself to 3 days of slot rows and 200 audits, staying well under the 500 MB free limit.
+**1. Create the VM (Azure for Students).**
 
-**API on Render (free, Frankfurt).** `render.yaml` defines the service. In Render, create a Blueprint from the repository, then fill the environment variables (all `sync: false`): `SOLAMI_API_KEY`, `SOLAMI_REGION` (`fra`), `DATABASE_URL`, and optionally `PROBE_SECRET`, `PROBE_BUDGET_SOL`, `PROBE_INTERVAL_SEC`, `PROBE_LIMIT`, `TIP_CEILING_LAMPORTS`, `AUDIT_MAX_BLOCKS`, `WEBHOOK_PUBLIC_URL`.
+1. In the Azure portal: Create a resource, Virtual machine.
+2. Resource group: new, `tipwise`. Name: `tipwise-api`. Region: **West Europe**. Image: **Ubuntu Server 24.04 LTS**. Size: **B2s** (2 vCPU, 4 GB). Do not pick B1s: its burst baseline is below what the streams need.
+3. Authentication: SSH public key, username `azureuser`, generate a new key pair and download it.
+4. Inbound ports: allow **SSH (22), HTTP (80), HTTPS (443)**.
+5. Disks: the default 30 GB Standard SSD is enough. Review and create.
+6. Open the VM, copy its **public IP address**. Under Configuration, set the IP to static if it is not already.
 
-- Build command: `npm ci --include=dev && npm run build`
-- Start command: `npm start`
-- Health check path: `/health`
+**2. Point a domain at it.** In your domain's DNS add an `A` record for `api` pointing at the VM IP (for example `api.tipwise.tech`). If the domain is not ready yet, use `<ip-with-dashes>.sslip.io` (for example `20-1-2-3.sslip.io`): it resolves to the IP with no setup, and Caddy can still get a certificate for it.
 
-Render's free plan sleeps a service after 15 minutes without inbound requests, which also stops the streams. Keep it awake during judging with an uptime pinger hitting `/health` every 5 minutes. The free plan also has only 0.1 CPU, about half of what the stream workload needs; see Limitations. The start command caps the V8 heap at 256 MB so the process fits a 512 MB instance.
+**3. Install Docker and start the stack.**
 
-**Dashboard on Vercel (free).** Import the repository, set the root directory to `web`, and set `NEXT_PUBLIC_API_BASE` to the Render URL. Both pages are static; CORS is open on the API.
+```bash
+ssh -i ~/Downloads/tipwise-api_key.pem azureuser@<VM IP>
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker $USER && exit        # log out so the group applies
+ssh -i ~/Downloads/tipwise-api_key.pem azureuser@<VM IP>
+
+git clone https://github.com/sadiqsaidu/tipwise.git
+cd tipwise
+cp .env.example .env
+nano .env
+```
+
+In `.env` set at least:
+
+```bash
+SOLAMI_API_KEY=sk_...
+SOLAMI_REGION=ams
+PROBE_SECRET=<base58 secret key of a funded burner wallet>
+PROBE_BUDGET_SOL=0.06
+API_DOMAIN=api.tipwise.tech
+ALLOWED_ORIGINS=https://tipwise.tech,https://www.tipwise.tech,http://localhost:3000
+ADMIN_TOKEN=<any long random string>
+POSTGRES_PASSWORD=<any long random string>
+```
+
+Remove the `DATABASE_URL` and `PORT` lines (the compose file sets both). Then:
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml logs -f api      # Ctrl+C to stop following
+curl https://api.tipwise.tech/health
+```
+
+`docker-compose.prod.yml` runs three containers with `restart: unless-stopped`: `db` (Postgres 16 on a named volume, not exposed), `api` (this repository's `Dockerfile`, non-root, heap capped at 256 MB) and `caddy` (ports 80 and 443, automatic HTTPS for `API_DOMAIN`, reverse proxy with flushing disabled so `/events` streams). To update: `git pull && docker compose -f docker-compose.prod.yml up -d --build`.
+
+**4. Frontend on Vercel (free).** Import the repository in Vercel, set the root directory to `web`, add the environment variable `NEXT_PUBLIC_API_BASE=https://api.tipwise.tech`, and deploy. Add your bare domain under Project, Settings, Domains and follow the DNS record Vercel shows. Put the final Vercel URL and domain in `ALLOWED_ORIGINS` on the VM and restart the API (`docker compose -f docker-compose.prod.yml up -d`).
+
+**Probe wallet.** Test trips and the free "Send a test" button both spend from `PROBE_SECRET`'s wallet, capped together by `PROBE_BUDGET_SOL` (tracked in Postgres). `GET /admin/probe` with `authorization: Bearer <ADMIN_TOKEN>` shows the budget, spend and wallet; nothing else exposes them.
 
 ## Limitations
 
@@ -254,7 +305,7 @@ Render's free plan sleeps a service after 15 minutes without inbound requests, w
 - Heat counts swaps of $100 or more, and in the measured windows heat did not reliably lead tips; the forecast only uses heat when the lag test qualifies.
 - Skipped leader slots are inferred from gaps between finalized slots; none were observed in thousands of consecutive slots during development.
 - The gRPC stream carries full tip transactions (about 1.7 MB/s); Yellowstone has no field projection for transactions, so it cannot be trimmed further without losing tips.
-- The API needs about 0.2 of a CPU core for the stream workload, twice what Render's free plan provides (0.1 CPU). On the free plan expect the gRPC queue to grow and slots behind to rise (both shown in `/health` and on the dashboard). Render Starter (0.5 CPU) or any small VM with a full core is enough; the code is the same.
+- The API needs about 0.2 of a CPU core sustained for the stream workload. Hosts with less (free web service tiers, burstable B1s VMs) let the gRPC queue grow and slots behind rise (both shown in `/health`); a B2s or any VM with a full core is enough.
 - `POST /send` accepts legacy and version 0 transactions (the web3.js parser); version 1 transactions are read everywhere else.
 
 ## License
