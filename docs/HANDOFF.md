@@ -25,12 +25,14 @@ Backend (`src/`, TypeScript strict ESM, run with tsx in development and compiled
 | `db.ts` | Drizzle schema, SSL-aware pool, startup migrator, retention prune, queries. |
 | `server.ts` | node:http router, JSON bodies, SSE with a 15 s heartbeat. |
 | `routes.ts` | Every HTTP route. |
-| `sdk.ts` | Client SDK (`createTipwise`): quote, tipInstruction, send, waitForReceipt. |
+| `sdk.ts` | Client SDK (`createTipwise`): fares, quote, tipInstruction, send (with an optional fare), waitForReceipt. |
+| `explain.ts` | Plain English receipt explanations (`explain`), a template per outcome. |
+| `products.ts` | The eight Solami product rows (status, job, live metric) for `/stats` and the `products` event. |
 | `demo.ts` | `npm run demo`: one quoted, tipped self transfer through the SDK. |
 | `doctor.ts` | `npm run doctor`: checks every Solami product. |
 | `main.ts` | Modes (`serve`, `doctor`, `demo`) and the wiring of streams, probes and storage. |
 
-Other: `drizzle/` (SQL migrations, applied at startup), `test/` (vitest: quote, forecast and lag, audit math, failure classes, fares, mood, explanations, rate limiter), `Dockerfile`, `docker-compose.prod.yml` and `deploy/Caddyfile` (production), `docker-compose.yml` (local Postgres), `web/` (Next.js dashboard: `app/page.tsx` weather, `app/audit/page.tsx` audit, `components/` six panels, `lib/events.ts` SSE hook and state, `lib/format.ts`).
+Other: `drizzle/` (SQL migrations, applied at startup), `test/` (vitest: quote, forecast and lag, audit math, failure classes, fares, mood, explanations, rate limiter), `Dockerfile`, `docker-compose.prod.yml` and `deploy/Caddyfile` (production), `docker-compose.yml` (local Postgres), `web/` (Next.js site: live board, checkup, send, receipt, track record, under the hood, developers; `lib/live.ts` is the one SSE store, `lib/api.ts` typed fetches, `lib/format.ts`; plain CSS modules).
 
 ## Verified Solami endpoints and shapes
 
@@ -101,3 +103,10 @@ WebSocket close codes: 4029 stream limit, 4002 bandwidth and balance empty, 1001
 - With a 2 slot deadline most probes land in 3 to 6 slots, so the model learns that high confidence is not reachable at these tips; a longer default deadline may suit the product better.
 - Heat has not shown a reliable lead in measured windows.
 - Ideas: a per-leader tip model (some leaders may need less), Beam-only quotes once Beam tips are common, a `getTransfersForAddress` audit path when Solami ships it, ShredStream for earlier slot signals, exporting receipts as CSV.
+
+## Status (October 11, 2026, Tipwise)
+
+- Renamed to Tipwise. Backend additions: fares, mood, SOL price cache, example wallets, free test sends (`POST /demo/send`), wallet sends with a fare, `explain`, Solami product telemetry, 600 slot window, rate limits, admin-only probe budget, 15 minute live watches. 47 tests pass.
+- The web app was rebuilt from scratch (split-flap board, slot river, receipts with stamps, journey, track record). Accessibility 100 on every page in Lighthouse; no horizontal scroll at 360 px.
+- Fares price at `FARE_FORECAST_SLOTS = 0` (no trend projection); before calibration the starting estimates push fares to the 75th percentile of tips Beam accepts.
+- Probe wallet balance was 0.0175 SOL before deployment; calibrating from an empty database needs about 40 probes and 0.017 SOL.

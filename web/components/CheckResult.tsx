@@ -13,6 +13,9 @@ const utc = (ms: number) =>
   new Date(ms).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "UTC" }) + " UTC";
 const clock = (ms: number) => new Date(ms).toLocaleTimeString("en-GB", { timeZone: "UTC" });
 
+const STRIP_MAX = 100;
+const TABLE_MAX = 200;
+
 type Verdict = "fair" | "above" | "low" | "unknown";
 
 function verdictOf(t: AuditTx): Verdict {
@@ -38,7 +41,7 @@ function sentence(sm: AuditSummary, price: number | null): string {
 
 function TradeStrip({ txs, price }: { txs: AuditTx[]; price: number | null }) {
   const [focus, setFocus] = useState<number | null>(null);
-  const trades = useMemo(() => txs.filter((t) => t.tip > 0).slice().reverse(), [txs]);
+  const trades = useMemo(() => txs.filter((t) => t.tip > 0).slice(0, STRIP_MAX).reverse(), [txs]);
   const values = trades.flatMap((t) => [t.tip, t.slotP25 ?? t.tip, t.slotP75 ?? t.tip]).filter((v) => v > 0);
   const lo = Math.log10(Math.min(...values) * 0.8);
   const hi = Math.log10(Math.max(...values) * 1.25);
@@ -307,6 +310,7 @@ export function CheckResult({ address }: { address: string }) {
                 <tbody>
                   {audit.txs
                     .filter((t) => t.tip > 0)
+                    .slice(0, TABLE_MAX)
                     .map((t) => (
                       <tr key={t.signature}>
                         <td>{t.blockTime ? clock(t.blockTime * 1000) : ""}</td>

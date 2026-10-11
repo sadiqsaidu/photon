@@ -1,31 +1,58 @@
 # Tipwise
 
-**A Solana tip oracle with receipts.** Every bot guesses its tip. Tipwise turns the guess into a quote, sends through Solami Beam, and proves the quote was right.
+**The going rate to get into the next Solana block.** Tipwise watches every tip that lands in every block, live, tells you what to pay, sends your transaction through Solami Beam, and hands you a receipt that proves when it landed.
 
-Landing a transaction on Solana means paying a tip on top of the fee, and nobody tells you how much is enough. Bots hardcode a number, overpay when the chain is quiet and lose the race when it is busy. Tipwise measures every landed tip in every slot from a Yellowstone gRPC stream, prices a tip for a deadline and a confidence you choose, sends through Beam, follows the transaction to finalized, and keeps score of how often its predictions were right.
+- **Live site:** LIVE_SITE_URL
+- **API:** LIVE_API_URL
+- **Demo video:** DEMO_VIDEO_URL
 
-## A real user story
+![The Tipwise live board: Saver, Standard and Express fares on a split-flap board, with every landed tip drifting past below](docs/screenshots/home.png)
 
-A solo developer runs a bot that buys tokens right after a pump.fun graduation, with a hardcoded tip of 0.002 SOL. Tipwise's Tip Audit shows that during quiet periods the tip sat far above the median landed tip of its slot (money left on the table), and during the busiest launches it fell below the slot's 25th percentile (lost races). The developer replaces the constant with `quote()` and `send()`: the tip now follows the live market, every send comes back with a receipt, and the dashboard shows whether the predicted landing probability held up.
+## In 30 seconds
 
-## What it does
+Solana makes a new block every 0.4 seconds. When it is busy, more transactions want in than fit, so you add a tip to get in fast. Nobody posts the price: pay too much and you waste money on every trade, pay too little and your trade lands late or misses.
 
-1. **Quote and send SDK.** `quote({ deadlineSlots, confidence })` returns a tip in lamports, a priority fee, the predicted probability of landing within the deadline, and whether the landing model is calibrated yet. `send(signedTx)` submits through Beam, tracks the transaction through processed, confirmed and finalized, and returns a receipt with the landed slot, per-stage latency, the Beam landing record, or a typed failure class.
-2. **Tip Audit.** Enter any wallet. Tipwise pulls its recent transactions, finds the tip each one paid, compares it with the tips that landed in the same slot, and reports total tips, estimated overpay and underpaid transactions. "Watch live" registers the wallet on a Solami webhook and updates the audit as new transactions land.
-3. **Block-space weather dashboard.** Live per-slot tip surface with a forecast, Blur market heat on an aligned strip, the measured lead or lag between heat and tips, a live quote widget, a calibration chart, probe lanes, upcoming leaders, and stream health (bandwidth, queue depth, reconnects, backpressure closures).
+Tipwise reads every tip that gets a transaction into every block, straight from a Solami Yellowstone gRPC stream, and turns that into three fares: Saver, Standard and Express, each with an honest chance of landing in time. It can send your transaction for you through Solami Beam and hand you a receipt that says when it landed, or in plain English why it did not. And it pays for its own small test transactions to check that its promises hold, so you can see it is honest.
+
+## Who it is for
+
+- **The bot developer** hardcodes a 0.002 SOL tip. In quiet hours that is far above the going rate, paid on every trade. During big launches it falls below the cheapest quarter of tips and loses the race. They replace the constant with the live fare and `send()`, and every transaction comes back with a receipt.
+- **The active trader** uses a trading tool with a "turbo" tip preset they never think about. They paste their wallet into Tipwise and see what it cost them, trade by trade, against the going rate in the same blocks.
+- **The keeper or liquidation bot** has to land within a couple of blocks during a crash. Tipwise tells them honestly how likely that is at their tip ceiling, instead of promising what the network cannot deliver.
+- **Anyone whose transaction "just failed"** gets a receipt that says in plain English what happened (the blockhash expired, the block builder skipped its turn, Beam refused it, or the program failed on chain) and what to do next.
+
+## What you can do
+
+**See the live fare.** The home page is a departure board for block space: what to tip right now for Saver, Standard and Express, in dollars and SOL, how fast each lands and how often. Below it, every tip of the last 4 minutes drifts past with the going rate as a band.
+
+**Check a wallet.** Paste any wallet, or pick one of the bots that tipped most in the last 10 minutes. Tipwise reads its last 100 transactions and prints a receipt: tips paid, the going rate in the same blocks, what was paid above it, how many tips were too low to compete, and a stamp (OVERPAID, FAIR or TOO LOW). "Watch this wallet live" prints new trades onto the receipt as they land.
+
+![A wallet checkup receipt stamped OVERPAID: a bot with a fixed tip far above the going rate, and its trade by trade strip](docs/screenshots/check.png)
+
+**Send a test.** Pick a fare and press "Send a test for me": Tipwise sends a real mainnet transaction through Beam from its own wallet, and you watch it travel from sent to finalized. Or send from your own wallet (Phantom, Solflare, Backpack) for the price of the tip. Either way you get a ticket with the promise check and a plain explanation.
+
+![A Tipwise ticket stamped LANDED, with the journey from sent to finalized](docs/screenshots/send.png)
+
+**See the track record.** Promise versus reality: for each price range, what Tipwise would have promised before each test trip and how often it actually landed in time.
+
+![Promise versus reality on the track record page](docs/screenshots/track-record.png)
+
+**Build with it.** The developer page has the SDK, curl, a live console and the API reference. Under the hood shows the eight Solami products at work, live.
+
+![The eight Solami products, live, on the Under the hood page](docs/screenshots/under-the-hood.png)
 
 ## How Solami is used
 
 | Product | What Tipwise does with it |
 | --- | --- |
 | Yellowstone gRPC | One subscription: slots (processed, confirmed, finalized), block meta (blockhash and block height), every successful transaction touching any of the 8 Jito tip accounts or the 15 Beam tip addresses (the landed tip distribution per slot, and lifecycle tracking for Tipwise's own sends), and status-only updates for failed transactions touching Beam tip addresses (`failed_onchain`). Reconnects resume with `from_slot`. Updates pass through a bounded queue so a slow moment never backs up Solami's server-side buffer. |
-| Mirage | The same slot stream over a plain WebSocket (a saved Mirage subscription), raced against gRPC: wins per source and the median lead. |
+| Mirage | The same slot stream over a plain WebSocket (a saved Mirage subscription, `tipwise-slots`), raced against gRPC: wins per source and the median lead. |
 | Blur (WebSocket) | Decoded market events: swaps of $100 or more, token creations, pool creations, graduations and surges, weighted into a per-slot heat signal. |
-| Beam | Every probe and every SDK send goes out as `sendTransaction` on Solami RPC with a transfer to a Beam tip address, which routes it through Beam. Tip addresses come from `GET /onchain/tip-addresses`; each receipt carries the landing record from `GET /swqos/tx/{signature}`. |
-| RPC | `getSlotLeaders` (leader table), `getRecentPrioritizationFees` (priority fee), `getLatestBlockhash` (fallback), `getSignatureStatuses` (expiry double check and restart recovery), `getBlock` (audit benchmarks for slots Tipwise did not stream), `getTransaction`, `getBalance`. |
-| Data API | `getTransactionsForAddress` (Solami's paginated wallet history RPC method) for the audit, falling back to `getSignaturesForAddress` plus `getTransaction`; `GET /data/token/price` for the SOL price in USD. |
-| Webhooks | One stream-mode webhook (enriched transfer events) for every watched wallet, consumed over `wss://{region}.ws.solami.dev/webhooks/stream/{id}`; HTTP delivery with HMAC verification is supported when a public URL is configured. |
-| Leader tracking | `GET /leader-tracking/current` every 2 s: the chain tip, so the dashboard shows how many slots the stream is behind. |
+| Beam | Every test trip, every free test send and every wallet or SDK send goes out as `sendTransaction` on Solami RPC with a transfer to a Beam tip address, which routes it through Beam. Tip addresses come from `GET /onchain/tip-addresses`; each receipt carries the landing record from `GET /swqos/tx/{signature}` (region, whether it went through Jito). |
+| RPC | `getSlotLeaders` (next block builders), `getRecentPrioritizationFees` (priority fee in every fare), `getLatestBlockhash` (fallback for `/blockhash`), `getSignatureStatuses` (expiry double check and restart recovery), `getBlock` (checkup benchmarks for blocks Tipwise did not stream), `getTransaction`, `getBalance`. |
+| Data API | `getTransactionsForAddress` (Solami's paginated wallet history RPC method) for wallet checkups, falling back to `getSignaturesForAddress` plus `getTransaction`; `GET /data/token/price` every 60 s for the SOL price behind every dollar figure. |
+| Webhooks | One stream-mode webhook (`tipwise-audit`, enriched transfer events) for every wallet being watched live, consumed over `wss://{region}.ws.solami.dev/webhooks/stream/{id}`. Watches expire after 15 minutes; the last one deletes the webhook. HTTP delivery with HMAC verification is supported when a public URL is configured. |
+| Leader tracking | `GET /leader-tracking/current` every 2 s: the chain tip, so the site shows how many blocks the stream is behind. |
 
 ## Quick start
 
@@ -42,7 +69,7 @@ npm run doctor                # checks every Solami product with your key
 npm run serve                 # API and streams on http://localhost:8080
 ```
 
-Then the dashboard:
+Then the site:
 
 ```bash
 cd web
@@ -84,7 +111,7 @@ Beam over RPC needs no separate swQoS key. Put the key in `SOLAMI_API_KEY` and p
 | `ALLOWED_ORIGINS` | no | `*` | Comma separated origins allowed by CORS. |
 | `API_DOMAIN` | prod | | Hostname Caddy serves and gets a certificate for (`docker-compose.prod.yml`). |
 | `POSTGRES_PASSWORD` | no | `tipwise` | Password of the production Postgres container. |
-| `NEXT_PUBLIC_API_BASE` | web | `http://localhost:8080` | Backend URL for the dashboard (`web/.env.local`). |
+| `NEXT_PUBLIC_API_BASE` | web | `http://localhost:8080` | Backend URL for the site (`web/.env.local`). The only web variable. |
 
 ## Run modes
 
@@ -93,37 +120,39 @@ Beam over RPC needs no separate swQoS key. Put the key in `SOLAMI_API_KEY` and p
 | `npm run serve` | Streams, probes, API and SSE (TypeScript via tsx). |
 | `npm run build && npm start` | The same server compiled to `dist/` (production). |
 | `npm run doctor` | Calls every Solami product with your key and prints reachable or unreachable with the exact error. |
-| `npm run demo` | Uses `PROBE_SECRET` to build a self transfer with a memo, quotes deadline 2 at confidence 0.9, sends through a running server, waits for the receipt and prints it with a Solscan link. |
-| `npm test` | Unit tests: quote and landing model, forecast and lag, audit math, failure classes. |
+| `npm run demo` | Uses `PROBE_SECRET` to build a self transfer with a memo, quotes deadline 2 at confidence 0.9, sends through a running server (`TIPWISE_URL`, default `http://localhost:8080`), waits for the receipt and prints it with a Solscan link. |
+| `npm test` | Unit tests: quote and landing model, forecast and lag, audit math, failure classes, fares, mood, receipt explanations, track record, example wallets, the rate limiter. |
 | `npm run typecheck` | TypeScript strict check. |
 
 ## SDK
 
-`src/sdk.ts` depends only on `@solana/web3.js` and runs in Node or the browser.
+`src/sdk.ts` depends only on `@solana/web3.js` and runs in Node or the browser. Copy it into your bot.
 
 ```ts
 import { ComputeBudgetProgram, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
 import { createTipwise } from "./sdk.js";
 
 const tipwise = createTipwise("https://your-tipwise-host");
-const quote = await tipwise.quote({ deadlineSlots: 2, confidence: 0.9 });
+const fare = (await tipwise.fares()).find((f) => f.id === "standard")!;
 
 const message = new TransactionMessage({
   payerKey: wallet.publicKey,
   recentBlockhash: blockhash,
   instructions: [
-    ComputeBudgetProgram.setComputeUnitPrice({ microLamports: quote.priorityFeeMicroLamports }),
+    ComputeBudgetProgram.setComputeUnitPrice({ microLamports: fare.priorityFeeMicroLamports }),
     ...yourInstructions,
-    await tipwise.tipInstruction(wallet.publicKey, quote.tipLamports),
+    await tipwise.tipInstruction(wallet.publicKey, fare.tipLamports),
   ],
 }).compileToV0Message();
 const tx = new VersionedTransaction(message);
 tx.sign([wallet]);
 
-const signature = await tipwise.send(tx);
+const signature = await tipwise.send(tx, "standard");
 const receipt = await tipwise.waitForReceipt(signature);
-console.log(receipt.failure ?? `landed in slot ${receipt.landedSlot}`, receipt.stages, receipt.beam);
+console.log(receipt.explanation?.title, receipt.explanation?.whatToDo);
 ```
+
+`tipwise.quote({ deadlineSlots, confidence })` prices any other deadline and confidence.
 
 ## API
 
@@ -155,9 +184,9 @@ The Solami key never leaves the server.
 
 **Tips.** For every successful transaction that touches a tip account, the tip is the post balance minus the pre balance of that account (lookup-table loaded accounts included). Tips are grouped by slot; when gRPC reports the slot confirmed, Tipwise computes count, p25, p50, p75, p90 and max, keeps the last 600 slots in memory, and writes one row per finalized slot to Postgres (batched every 2 s). Tips are tagged `jito` or `beam`.
 
-**The Beam floor.** Beam rejects tips below 100,000 lamports, which sits around the 90th percentile of all landed tips. Quotes therefore price inside the tips a Beam send could actually pay: landed tips at or above the floor (from Beam tips alone once there are 200 in the window). The API and dashboard show where the floor sits in the full distribution.
+**The Beam floor.** Beam rejects tips below 100,000 lamports, which sits around the 90th percentile of all landed tips. Quotes therefore price inside the tips a Beam send could actually pay: landed tips at or above the floor (from Beam tips alone once there are 200 in the window). The API and the river on the home page show where the floor sits in the full distribution.
 
-**Heat and the lag test.** Each Blur event adds to its slot's heat (swap 1, token creation 3, pool creation 5, surge 5, graduation 10); events without a slot use the latest processed slot. Heat counts swaps of $100 or more, which cuts Blur bandwidth by about 85%. Every 30 s Tipwise computes the Pearson correlation between heat at slot t and tip p75 at slot t+k for k from 0 to 20 over the last 900 slots, and publishes the best k and r. The forecast uses heat only when r is at least 0.2 and k at least 1. The dashboard shows the result either way, including "no lead detected".
+**Heat and the lag test.** Each Blur event adds to its slot's heat (swap 1, token creation 3, pool creation 5, surge 5, graduation 10); events without a slot use the latest processed slot. Heat counts swaps of $100 or more, which cuts Blur bandwidth by about 85%. Every 30 s Tipwise computes the Pearson correlation between heat at slot t and tip p75 at slot t+k for k from 0 to 20 over the last 900 slots, and publishes the best k and r. The forecast uses heat only when r is at least 0.2 and k at least 1. Under the hood shows the result either way, including "no lead detected".
 
 **Forecast.** Holt double exponential smoothing on per-slot p50 and p90, projected h slots ahead. When the heat signal qualifies, the projection is multiplied by `1 + beta * z(heat now)`, with beta fitted by least squares on the window and the multiplier clamped to [0.8, 2.0].
 
@@ -165,9 +194,19 @@ The Solami key never leaves the server.
 
 **Probes.** With `PROBE_SECRET` set, Tipwise sends one probe every `PROBE_INTERVAL_SEC`: a compute unit price, a `tipwise-probe` memo and a tip to a random Beam tip address. Each probe targets the least-sampled reachable bucket (ties at random) with the tip whose mid-rank falls inside that bucket, closest to its middle. Many tips are exactly 100,000 lamports, so a plain midpoint can land in the neighbouring bucket; the mid-rank search avoids that. Before the first send Tipwise simulates the whole run (every probe until each reachable bucket has 10, or `PROBE_LIMIT`) and does not start if its cost exceeds the budget left. Probing stops when the reachable buckets are full or the budget is spent; spend is stored in Postgres, so a restart cannot overspend.
 
+**Fares.** Saver (10 slots at 0.8), Standard (6 slots at 0.9) and Express (3 slots at 0.95) are quotes with fixed deadlines and confidences (`FARES` in `src/config.ts`). Fares price the live window without the per-slot trend projection (per-slot percentiles swing by 10x between slots, so any projection made the board jump), and a slower fare never costs more than a faster one. When no reachable bucket meets a fare's confidence, the fare shows its real probability as best effort.
+
+**Mood.** The median landed tip of the last 50 confirmed slots against the median of the whole window: below 0.8 times is quiet, above 1.5 times is rush hour, otherwise busy.
+
+**Track record.** Each test trip is scored out of sample against the Standard deadline: the promise is what the landing model would have said from the trips sent before it (priors until calibrated), and the delivered rate is how many actually landed in time. The page reports the average gap in percentage points.
+
+**Free test sends.** `POST /demo/send` sends one transaction from the probe wallet at a fare's tip and priority fee, tracked like any send with `kind: "demo"`. Demos share the probe budget but stay out of calibration: their tips follow the fare rather than a target bucket, and their promise is for the fare's deadline, not the 2 slot calibration deadline.
+
 **Failure classes.** `send_rejected`: Beam returned an error at send time. `failed_onchain`: the transaction landed with an error. `leader_skipped`: not landed before expiry, and one of the first 4 slots after the send never confirmed while a later slot did. `expired_blockhash`: not landed and the streamed block height passed the blockhash's last valid block height (never decided on wall clock). Before either of the last two, Tipwise makes one `getSignatureStatuses` check in case the stream missed the landing. After settling, the Beam landing record is attached to the receipt.
 
-**Audit math.** For each transaction: tip paid is the sum of System transfers from the wallet to any Jito or Beam tip address (cross-program transfers included), priority fee is the fee minus 5,000 lamports per signature. The slot benchmark comes from stored slot stats, or from `getBlock` for slots Tipwise did not stream (concurrency 8, at most `AUDIT_MAX_BLOCKS` per audit). Overpay is `max(0, tip - slot p50)`; a transaction is underpaid when its tip is below the slot's p25. **Overpay is an estimate against the slot median**, not a claim that a smaller tip would have landed.
+**Receipt explanations.** `explain()` in `src/explain.ts` is a template over the facts on the receipt, one per outcome (landed, with the promise check, or one of the four failure classes). No language model is involved: it is instant, free, deterministic and cannot invent a cause.
+
+**Audit math.** For each transaction: tip paid is the sum of System transfers from the wallet to any Jito or Beam tip address (cross-program transfers included), priority fee is the fee minus 5,000 lamports per signature. The slot benchmark comes from stored slot stats, or from `getBlock` for slots Tipwise did not stream (concurrency 8, at most `AUDIT_MAX_BLOCKS` per audit). Overpay is `max(0, tip - slot p50)`; a transaction is underpaid when its tip is below the slot's p25. **Overpay is an estimate against the slot median**, not a claim that a smaller tip would have landed. The stamp is OVERPAID when more than 30% of the tips paid were above the going rate, TOO LOW when more than 25% of compared trades were too low, otherwise FAIR. The monthly figure projects the overpay over the time span the checkup covers.
 
 ## Costs
 
@@ -183,7 +222,7 @@ To be filled from the hosted instance after the live run:
 
 | What | Value |
 | --- | --- |
-| Hosted dashboard | `TODO: Vercel URL` |
+| Hosted site | `TODO: site URL` |
 | Hosted API | `TODO: API URL` |
 | Probe signatures (hosted run) | `TODO: list with Solscan links` |
 | Demo signature (hosted run) | `TODO` |
@@ -216,6 +255,9 @@ Additional proof from development (October 7, 2026, region ams, all sent through
 | probe (verification) | [3TXXfiCm...J7p4Ycy5](https://solscan.io/tx/3TXXfiCmGiLe7wF2uCDWmEt8rGWgxEzakcAPLF4MtXEwkAc46QvK92uXHCKeuNCo25t4Tq8E1fccBmKxJ7p4Ycy5) | 100,001 | 4 | landed, ams |
 | probe (verification) | [5Ti9Ct81...L7eXGxHZ8](https://solscan.io/tx/5Ti9Ct81bGgar2atSrPQJXtanMcywRjEroLxnTddDvNFa1kcd67a1e6kjDq8namgcrWVsPJjkotLZ3HL7eXGxHZ8) | 192,079 | 5 | landed, ams |
 
+| free test send (Saver) | [21R9Jsrv...Gb4gdj](https://solscan.io/tx/21R9JsrvYdkeNxidGgQGkkTm7JwNJ15nocSF1SRriu6qTFvMpq8o5u26SY1C5RTFEV2HnmJ6JMDjsegmBvGb4gdj) | 1,000,000 | 2 | landed, ams |
+| free test send (Saver) | [299rq6AT...j2g3mW](https://solscan.io/tx/299rq6ATYVQD1rXRW1E6qqR3JdVsYu5Ez5UgJeKp6mn9sB6q2MchUgKqZsgSk2T5Kqnrt1oTjfwAx265jrj2g3mW) | 1,000,000 | 2 | landed, ams |
+
 Three earlier probes (EqKpkPk8..., 44nHNaWu..., jJLJr9b2...) were sent while the gRPC stream was lagging on a long-haul link before the HTTP/2 window fix; they count toward spend but are excluded from calibration. Lag measured during development: no lead detected over 888 slots (best r = 0.053 at k = 8).
 
 ## Architecture
@@ -237,7 +279,7 @@ Three earlier probes (EqKpkPk8..., 44nHNaWu..., jJLJr9b2...) were sent while the
        |
    Postgres (slot_stats, receipts, audits, leader_skips)
        |
-   node:http API + SSE  --->  Next.js dashboard (/ and /audit), SDK
+   node:http API + SSE  --->  Next.js site (board, checkup, send, track record), SDK
 ```
 
 ## Deploy

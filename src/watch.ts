@@ -43,8 +43,10 @@ async function applyEvent(ev: solami.WebhookEvent): Promise<void> {
   const involved = new Set((ev.transfers ?? []).flatMap((t) => [t.from_owner, t.to_owner]));
   const addresses = [...live.keys()].filter((a) => involved.has(a));
   if (!addresses.length) return;
-  const tx = await fetchTx(ev.signature);
-  if (!tx) return;
+  const fetched = await fetchTx(ev.signature);
+  if (!fetched) return;
+  // Confirmed transactions can come back before their block time is known.
+  const tx = { ...fetched, blockTime: fetched.blockTime ?? Math.floor(Date.now() / 1000) };
   const bench = new Map<number, SlotStats>();
   const row = confirmedRow(tx.slot) ?? (await slotRows([tx.slot]))[0];
   if (row) bench.set(tx.slot, row);

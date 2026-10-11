@@ -73,6 +73,7 @@
 
 .strip {
   display: flex;
+  overflow: hidden;
   height: 160px;
   border-left: 1px solid var(--concrete-3);
   border-bottom: 1px solid var(--concrete-3);
