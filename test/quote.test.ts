@@ -25,10 +25,17 @@ describe("landing model", () => {
     for (let i = 1; i < p.length; i++) expect(p[i]!).toBeGreaterThanOrEqual(p[i - 1]!);
   });
 
-  it("uses priors until every bucket has 10 probes", () => {
-    const thin = probabilities(probes(0, 50, 0), 2);
-    expect(thin.calibrated).toBe(false);
-    expect(thin.p).toEqual(BUCKETS.map((b) => b.prior));
+  it("uses priors for buckets under 10 probes, measured rates for the rest", () => {
+    const none = probabilities(probes(0, 9, 0), 2);
+    expect(none.calibrated).toBe(false);
+    expect(none.p).toEqual(BUCKETS.map((b) => b.prior));
+    const partial = probabilities([...probes(0, 10, 0), ...probes(1, 10, 0), ...probes(2, 10, 0), ...probes(3, 4, 0)], 2);
+    expect(partial.calibrated).toBe(false);
+    expect(partial.p.slice(0, 3).map((v) => Math.round(v * 1000))).toEqual([917, 917, 917]);
+    expect(partial.p[3]).toBeCloseTo(11 / 12);
+    expect(partial.p[4]).toBeCloseTo(11 / 12);
+    const slow = probabilities([...probes(0, 6, 4), ...probes(1, 10, 0), ...probes(2, 2, 0)], 2);
+    expect(slow.p.map((v) => Math.round(v * 1000))).toEqual([583, 917, 917, 917, 917]);
     const full = probabilities(BUCKETS.flatMap((_, i) => probes(i, 10, 0)), 2);
     expect(full.calibrated).toBe(true);
     expect(full.p[0]).toBeCloseTo(11 / 12);

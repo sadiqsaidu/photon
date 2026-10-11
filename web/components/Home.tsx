@@ -72,7 +72,9 @@ export function Learning() {
     <p className={s.learning}>
       <FlapTile className={s.mini} />
       <span>
-        Still learning: {fares.progress.done} of {fares.progress.needed} test trips done. Until then, the chances shown are starting estimates.{" "}
+        {fares.progress.done >= 10
+          ? `The market moved, so Tipwise is testing a new price range: ${fares.progress.done} of ${fares.progress.needed} test trips done. Ranges already tested use real results.`
+          : `Still learning: ${fares.progress.done} of ${fares.progress.needed} test trips done. Until then, the chances shown are starting estimates.`}{" "}
         <Link href="/track-record">How we check</Link>
       </span>
     </p>

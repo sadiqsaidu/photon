@@ -70,7 +70,14 @@ export function landingModel(outcomes: ProbeOutcome[], deadline: number, reachab
 
 export function probabilities(outcomes: ProbeOutcome[], deadline: number, reachable = ALL_REACHABLE): { p: number[]; calibrated: boolean } {
   const model = landingModel(outcomes, deadline, reachable);
-  return model.calibrated ? { p: model.buckets.map((b) => b.p), calibrated: true } : { p: BUCKETS.map((b) => b.prior), calibrated: false };
+  if (model.calibrated) return { p: model.buckets.map((b) => b.p), calibrated: true };
+  // A bucket with enough probes keeps its measured rate even while another
+  // one (newly reachable as the market moves) is still being filled.
+  // Thin buckets carry the rate below them, never a prior above measured data.
+  if (!model.buckets.some((b) => b.n >= MIN_BUCKET_PROBES)) return { p: BUCKETS.map((b) => b.prior), calibrated: false };
+  let floor = 0;
+  const p = model.buckets.map((b) => (floor = b.n >= MIN_BUCKET_PROBES ? Math.max(floor, (b.landed + 1) / (b.n + 2)) : floor));
+  return { p, calibrated: false };
 }
 
 export function pickBucket(p: number[], confidence: number, reachable = ALL_REACHABLE): { index: number; meetsConfidence: boolean } {
