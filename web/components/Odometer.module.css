@@ -1,0 +1,49 @@
+.odo {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 0.06em;
+  font-family: var(--display);
+  font-weight: 600;
+  color: var(--amber);
+  line-height: 1;
+}
+
+.cell {
+  position: relative;
+  width: 0.62em;
+  height: 1.28em;
+  overflow: hidden;
+  border-radius: 0.07em;
+  background: linear-gradient(var(--flap-top) 0 50%, var(--flap) 50% 100%);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
+.cell::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(50% - 0.5px);
+  height: 1px;
+  background: var(--hinge);
+}
+
+.strip {
+  display: flex;
+  flex-direction: column;
+  transition: transform 260ms cubic-bezier(0.3, 0.7, 0.3, 1);
+}
+
+.strip span {
+  display: grid;
+  place-items: center;
+  height: 1.28em;
+  flex: none;
+}
+
+.comma {
+  align-self: flex-end;
+  width: 0.24em;
+  padding-bottom: 0.08em;
+  color: var(--board-label);
+}

@@ -1,0 +1,45 @@
+.figure {
+  margin: 0;
+}
+
+.box {
+  position: relative;
+  height: 260px;
+  opacity: 0;
+  transition: opacity 700ms ease 500ms;
+  touch-action: pan-y;
+}
+
+.ready {
+  opacity: 1;
+}
+
+.canvas {
+  display: block;
+  font-family: var(--body);
+}
+
+.tip {
+  position: absolute;
+  pointer-events: none;
+  display: grid;
+  gap: 2px;
+  min-width: 170px;
+  padding: 10px 12px;
+  background: var(--board);
+  color: #e9ebee;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.tip strong {
+  font-weight: 600;
+  color: var(--amber);
+}
+
+@media (max-width: 640px) {
+  .box {
+    height: 220px;
+  }
+}

@@ -1,0 +1,202 @@
+.board {
+  position: relative;
+  background: var(--board);
+  border-radius: 12px;
+  padding: 22px 28px 14px;
+  color: var(--amber);
+  box-shadow: var(--shadow-object);
+}
+
+.board :focus-visible {
+  outline-color: var(--amber);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--board-rule);
+}
+
+.next,
+.status {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 28px;
+}
+
+.label {
+  font: 500 13px/1.3 var(--body);
+  color: var(--board-label);
+}
+
+.statusFlaps {
+  font-size: 22px;
+}
+
+.cols,
+.row {
+  display: grid;
+  grid-template-columns: 30% 26% 20% 24%;
+  align-items: start;
+}
+
+.cols {
+  padding: 16px 0 10px;
+  font: 500 13px/1 var(--body);
+  color: var(--board-label);
+}
+
+.rows {
+  list-style: none;
+}
+
+.row {
+  padding: 16px 0;
+  border-top: 1px solid #1d2026;
+  transition: opacity 400ms;
+}
+
+.fareFlaps {
+  font-size: 30px;
+  margin-top: 6px;
+}
+
+.big {
+  font-size: 46px;
+}
+
+.sub {
+  display: block;
+  margin-top: 8px;
+  font: 400 13px/1.4 var(--body);
+  color: var(--board-label);
+}
+
+.timeValue,
+.chanceValue {
+  display: inline-flex;
+  align-items: center;
+}
+
+.unit {
+  font: 600 22px/1 var(--display);
+  color: var(--amber);
+  margin-left: 6px;
+  align-self: flex-end;
+  padding-bottom: 6px;
+}
+
+.lamp {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 12px;
+  background: #2a2e35;
+  flex: none;
+}
+
+.ok {
+  background: var(--lamp-green);
+  box-shadow: 0 0 0 3px rgba(61, 220, 132, 0.16);
+}
+
+.effort {
+  background: var(--amber-dim);
+}
+
+.dim [class*="cell"] {
+  color: var(--amber-dim);
+}
+
+.stale .rows,
+.stale .next {
+  opacity: 0.45;
+}
+
+@media (max-width: 960px) {
+  .big {
+    font-size: 38px;
+  }
+  .fareFlaps {
+    font-size: 24px;
+  }
+}
+
+@media (max-width: 720px) {
+  .board {
+    padding: 16px 16px 6px;
+  }
+  .head {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+  .next {
+    font-size: 21px;
+    gap: 10px;
+  }
+  .status {
+    display: none;
+  }
+  .cols {
+    display: none;
+  }
+  .row {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "fare tip"
+      "time chance";
+    row-gap: 12px;
+    column-gap: 12px;
+  }
+  .fare {
+    grid-area: fare;
+  }
+  .tip {
+    grid-area: tip;
+    text-align: right;
+  }
+  .time {
+    grid-area: time;
+  }
+  .chance {
+    grid-area: chance;
+    text-align: right;
+  }
+  .chanceValue {
+    justify-content: flex-end;
+  }
+  .fare .sub,
+  .tip .sub {
+    display: none;
+  }
+  .fareFlaps {
+    font-size: 20px;
+  }
+  .tip .big {
+    font-size: 36px;
+  }
+  .time .big,
+  .chance .big {
+    font-size: 21px;
+  }
+  .unit {
+    font-size: 15px;
+    padding-bottom: 3px;
+  }
+  .sub {
+    margin-top: 4px;
+  }
+}
+
+@media (max-width: 380px) {
+  .tip .big {
+    font-size: 30px;
+  }
+  .fareFlaps {
+    font-size: 17px;
+  }
+}

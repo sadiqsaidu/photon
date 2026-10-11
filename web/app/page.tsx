@@ -1,107 +1,84 @@
-"use client";
+import { Board } from "@/components/Board";
+import { CheckForm } from "@/components/CheckForm";
+import { Learning, MoodGauge, TipNote } from "@/components/Home";
+import { SlotRiver } from "@/components/SlotRiver";
+import s from "./page.module.css";
 
-import { useEffect, useRef, useState } from "react";
-import { Calibration } from "@/components/Calibration";
-import { Leaders } from "@/components/Leaders";
-import { ProbeLanes } from "@/components/ProbeLanes";
-import { QuoteWidget } from "@/components/QuoteWidget";
-import { TipSurface } from "@/components/TipSurface";
-import { TopBar } from "@/components/TopBar";
-import { useLive, type StreamHealth } from "@/lib/events";
+const STEPS = [
+  {
+    title: "Measures every tip",
+    body: "Tipwise streams every block from Solami as it is made and records every tip that got a transaction into it. That is the going rate, not a guess.",
+  },
+  {
+    title: "Prices your fare",
+    body: "Pick how fast you need to land. Tipwise picks the cheapest tip that has landed that fast often enough, and tells you the honest chance.",
+  },
+  {
+    title: "Proves it with receipts",
+    body: "Every send gets a receipt that says when it landed or why it did not. Tipwise also pays for its own test trips to check its promises.",
+  },
+];
 
-function StreamPanel({ streams }: { streams: StreamHealth[] }) {
-  const last = useRef<{ at: number; bytes: Record<string, number> } | null>(null);
-  const [rates, setRates] = useState<Record<string, number>>({});
-  useEffect(() => {
-    const now = Date.now();
-    const bytes = Object.fromEntries(streams.map((s) => [s.name, s.bytes]));
-    const prev = last.current;
-    if (prev && now - prev.at > 1_000) {
-      setRates(Object.fromEntries(streams.map((s) => [s.name, ((s.bytes - (prev.bytes[s.name] ?? s.bytes)) * 1000) / (now - prev.at) / 1e6])));
-    }
-    last.current = { at: now, bytes };
-  }, [streams]);
-  const queue = streams.find((s) => s.queue)?.queue;
-  const blocked = streams.filter((s) => s.blocked);
+export default function Home() {
   return (
-    <section className="panel">
-      <div className="title">
-        <span className="label">stream health</span>
-        {queue && (
-          <span className={`tag ${queue.depth > queue.capacity / 2 ? "bad" : "good"}`}>
-            gRPC queue {queue.depth.toLocaleString("en-US")} (peak {queue.maxDepth.toLocaleString("en-US")} of {queue.capacity.toLocaleString("en-US")})
-          </span>
-        )}
+    <div className="wrap">
+      <section className={s.hero}>
+        <div className={s.lede}>
+          <h1 className="h1">The going rate to get into the next Solana block.</h1>
+          <p className="lede">
+            A block leaves every 0.4 seconds. Tipwise watches every tip that gets a transaction into one, and tells you what to pay right now.
+          </p>
+        </div>
+        <div className={s.mood}>
+          <MoodGauge />
+        </div>
+      </section>
+
+      <div className={s.boardWrap}>
+        <Board />
+        <TipNote />
       </div>
-      {blocked.map((s) => (
-        <p key={s.name} className="tag bad" style={{ marginTop: 0 }}>
-          {s.name} refused by Solami: {s.blocked}. Serving stored data; retrying every 5 minutes.
+      <Learning />
+      <div className={s.moodMobile}>
+        <MoodGauge />
+      </div>
+
+      <section className={s.river} aria-labelledby="river-title">
+        <div className={s.riverHead}>
+          <h2 id="river-title" className="h2">
+            Every tip, live
+          </h2>
+          <p className="small muted">Each dot is a tip that got a transaction into a block. The band is the going rate.</p>
+        </div>
+        <SlotRiver />
+        <p className={`small muted ${s.riverNote}`}>
+          Most of these tips are Jito bundle tips, which can be tiny. Beam, which Tipwise sends through, only takes tips above the dashed line, so the
+          fares on the board are priced among those.
         </p>
-      ))}
-      <div className="scroll-x">
-        <table>
-          <thead>
-            <tr>
-              <th>stream</th>
-              <th>state</th>
-              <th className="r">MB/s</th>
-              <th className="r">reconnects</th>
-              <th className="r">backpressure closures</th>
-            </tr>
-          </thead>
-          <tbody>
-            {streams.map((s) => (
-              <tr key={s.name}>
-                <td>{s.name}</td>
-                <td>
-                  <span className={`live ${s.connected ? "" : "down"}`} />
-                  {s.connected ? "up" : s.blocked ? "refused" : "reconnecting"}
-                </td>
-                <td className="r">{rates[s.name] === undefined ? "-" : rates[s.name]?.toFixed(3)}</td>
-                <td className="r">{s.reconnects}</td>
-                <td className="r">{s.backpressureClosures}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {queue && queue.dropped > 0 && <p className="faint" style={{ margin: "8px 0 0", fontSize: 11 }}>{queue.dropped.toLocaleString("en-US")} transaction updates shed while the queue was full.</p>}
-    </section>
-  );
-}
+      </section>
 
-export default function Dashboard() {
-  const live = useLive();
-  const s = live.stats;
-  return (
-    <main className="shell">
-      <TopBar live={live} />
-      {live.error && !s && (
-        <div className="panel">
-          <span className="tag bad">backend unreachable</span> <span className="muted">{live.error}. Start it with npm run serve.</span>
+      <section className={s.check} aria-labelledby="check-title">
+        <h2 id="check-title" className="h2">
+          Check what a wallet pays to get in.
+        </h2>
+        <div className={s.checkForm}>
+          <CheckForm />
         </div>
-      )}
-      {s && s.degraded.length > 0 && (
-        <div className="panel" role="status">
-          <span className="tag bad">degraded</span>{" "}
-          {s.degraded.map((d) => (
-            <span key={d.feature} className="muted" style={{ marginRight: 12 }}>
-              {d.feature}: {d.error}
-            </span>
+      </section>
+
+      <section className={s.how} aria-labelledby="how-title">
+        <h2 id="how-title" className="h2">
+          How it works
+        </h2>
+        <div className={s.steps}>
+          {STEPS.map((step) => (
+            <div key={step.title}>
+              <h3 className="h3">{step.title}</h3>
+              <p className="muted">{step.body}</p>
+            </div>
           ))}
-          <span className="faint">Stored data stays available; refused streams retry every 5 minutes.</span>
         </div>
-      )}
-      <QuoteWidget />
-      <TipSurface stats={s} />
-      <div className="grid-2">
-        <Calibration stats={s} />
-        <ProbeLanes stats={s} />
-      </div>
-      <div className="grid-2">
-        <Leaders stats={s} />
-        <StreamPanel streams={s?.streams ?? []} />
-      </div>
-    </main>
+      </section>
+    </div>
   );
 }

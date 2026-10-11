@@ -1,0 +1,129 @@
+.flaps {
+  display: inline-flex;
+  gap: 0.06em;
+  vertical-align: middle;
+}
+
+.cell {
+  position: relative;
+  display: inline-block;
+  width: 0.66em;
+  height: 1.28em;
+  perspective: 6em;
+  font-family: var(--display);
+  font-weight: 600;
+  line-height: 1;
+  color: var(--amber);
+  flex: none;
+}
+
+.narrow {
+  width: 0.42em;
+}
+
+.cell::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(50% - 0.5px);
+  height: 1px;
+  background: var(--hinge);
+  z-index: 3;
+}
+
+.half {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 50%;
+  overflow: hidden;
+  backface-visibility: hidden;
+}
+
+.top {
+  top: 0;
+  background: var(--flap-top);
+  border-radius: 0.07em 0.07em 0 0;
+  transform-origin: 50% 100%;
+}
+
+.bottom {
+  bottom: 0;
+  background: var(--flap);
+  border-radius: 0 0 0.07em 0.07em;
+  transform-origin: 50% 0;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
+.glyph {
+  display: grid;
+  place-items: center;
+  height: 200%;
+  width: 100%;
+}
+
+.bottom .glyph {
+  transform: translateY(-50%);
+}
+
+.leaves {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+}
+
+.leafTop {
+  animation: leafTop 60ms ease-in both;
+}
+
+.leafBottom {
+  transform: rotateX(90deg);
+  animation: leafBottom 60ms ease-out both;
+}
+
+@keyframes leafTop {
+  from {
+    transform: rotateX(0deg);
+    filter: brightness(1);
+  }
+  to {
+    transform: rotateX(-90deg);
+    filter: brightness(0.55);
+  }
+}
+
+@keyframes leafBottom {
+  from {
+    transform: rotateX(90deg);
+    filter: brightness(0.6);
+  }
+  to {
+    transform: rotateX(0deg);
+    filter: brightness(1);
+  }
+}
+
+.tile {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 28px;
+  border-radius: 3px;
+  background: linear-gradient(var(--flap-top) 0 50%, var(--board) 50% 100%);
+  color: var(--amber);
+  font: 700 20px/1 var(--display);
+  overflow: hidden;
+  flex: none;
+}
+
+.tile::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(50% - 0.5px);
+  height: 1px;
+  background: #000;
+}
