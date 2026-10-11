@@ -1,6 +1,6 @@
 import { Board } from "@/components/Board";
 import { CheckForm } from "@/components/CheckForm";
-import { Learning, MoodGauge, TipNote } from "@/components/Home";
+import { Learning, MoodGauge, SamePrice, TipNote } from "@/components/Home";
 import { SlotRiver } from "@/components/SlotRiver";
 import s from "./page.module.css";
 
@@ -38,6 +38,7 @@ export default function Home() {
         <Board />
         <TipNote />
       </div>
+      <SamePrice />
       <Learning />
       <div className={s.moodMobile}>
         <MoodGauge />

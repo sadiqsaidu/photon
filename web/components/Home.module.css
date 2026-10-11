@@ -114,3 +114,26 @@
     left: 40px;
   }
 }
+
+.same {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 16px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.sameMark {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  height: 18px;
+  margin-top: 3px;
+  border-radius: 3px;
+  background: var(--board);
+  color: var(--amber);
+  font: 700 13px/1 var(--display);
+}

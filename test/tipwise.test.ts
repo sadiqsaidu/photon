@@ -35,6 +35,10 @@ describe("fares", () => {
     expect(out.map((f) => f.tipLamports)).toEqual([500, 500, 700]);
   });
 
+  it("asks for no confidence the smoothed model cannot reach with 10 probes per bucket", () => {
+    for (const f of FARES) expect(f.confidence).toBeLessThanOrEqual(11 / 12);
+  });
+
   it("leaves dollars empty without a SOL price", async () => {
     expect((await fares([], null)).fares.every((f) => f.tipUsd === null)).toBe(true);
   });

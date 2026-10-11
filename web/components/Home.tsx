@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useLive } from "@/lib/live";
 import type { Mood } from "@/lib/types";
-import { MOOD_WORD } from "./Board";
+import { MOOD_WORD, samePriceLine } from "./Board";
 import { FlapTile } from "./Flap";
 import s from "./Home.module.css";
 
@@ -37,6 +37,20 @@ export function MoodGauge() {
         )}
       </p>
     </div>
+  );
+}
+
+export function SamePrice() {
+  const fares = useLive((st) => st.fares);
+  const line = fares ? samePriceLine(fares.fares, fares.calibrated) : null;
+  if (!line) return null;
+  return (
+    <p className={s.same} aria-live="polite">
+      <span className={s.sameMark} aria-hidden="true">
+        =
+      </span>
+      {line}
+    </p>
   );
 }
 

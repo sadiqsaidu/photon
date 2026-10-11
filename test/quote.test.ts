@@ -44,6 +44,11 @@ describe("pickBucket", () => {
   it("falls back to the top bucket when none qualifies", () => {
     expect(pickBucket(p, 0.99)).toEqual({ index: 4, meetsConfidence: false });
   });
+  it("never quotes a pricier bucket for the same probability", () => {
+    const flat = [11 / 12, 11 / 12, 11 / 12, 11 / 12, 11 / 12];
+    expect(pickBucket(flat, 0.95)).toEqual({ index: 0, meetsConfidence: false });
+    expect(pickBucket([0.5, 0.7, 0.7, 0.7, 0.7], 0.9, [true, true, true, false, false])).toEqual({ index: 1, meetsConfidence: false });
+  });
 });
 
 describe("calibration", () => {

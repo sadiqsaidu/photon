@@ -35,6 +35,24 @@ function useCycling(active: boolean): string {
   return `$0.${String((n * 7919) % 1000).padStart(3, "0")}`;
 }
 
+// The slower fare a fare shares its price with, if any.
+export function sameAs(fares: Fare[], f: Fare): Fare | null {
+  return fares.find((x) => x.id !== f.id && x.tipLamports === f.tipLamports && fares.indexOf(x) < fares.indexOf(f)) ?? null;
+}
+
+// Equal prices are a real state, not a glitch: the cheapest fare already
+// lands fast enough, or a bigger tip would not raise the chance.
+export function samePriceLine(fares: Fare[], calibrated: boolean): string | null {
+  const [saver, standard, express] = fares;
+  if (!saver || !standard || !express) return null;
+  const floor = calibrated && saver.meetsConfidence;
+  const cause = floor ? "Quiet market: the cheapest tip is landing fast" : "A bigger tip would not raise the chance right now";
+  if (saver.tipLamports === standard.tipLamports && standard.tipLamports === express.tipLamports) return `${cause}, so all three fares cost the same right now.`;
+  if (saver.tipLamports === standard.tipLamports) return `${cause}, so Standard costs the same as Saver right now.`;
+  if (standard.tipLamports === express.tipLamports) return `${floor ? cause : "Paying more would not make it land faster right now"}, so Express costs the same as Standard right now.`;
+  return null;
+}
+
 function summary(fares: Fare[]): string {
   return fares
     .map((f) => `${f.label}: ${usd(f.tipUsd) || sol(f.tipLamports)}, lands within ${(f.deadlineMs / 1000).toFixed(1)} seconds, ${pct(f.probability)} chance${f.meetsConfidence ? "" : ", best effort"}.`)
@@ -102,7 +120,7 @@ export function Board() {
               </div>
               <div className={s.tip}>
                 <Flaps text={f ? tipText(f) : cycling} length={6} align="right" offset={offset + 60} className={s.big} label={f ? `Tip ${usd(f.tipUsd) || sol(f.tipLamports)}` : undefined} />
-                <span className={s.sub}>{f ? sol(f.tipLamports) : " "}</span>
+                <span className={s.sub}>{f ? `${sol(f.tipLamports)}${sameAs(rows, f) ? `, same as ${sameAs(rows, f)!.label}` : ""}` : " "}</span>
               </div>
               <div className={s.time}>
                 <span className={s.timeValue}>

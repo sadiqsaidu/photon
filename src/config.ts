@@ -106,10 +106,13 @@ export const PROBE_COMPUTE_UNIT_LIMIT = 20_000;
 
 export const SLOT_MS = 400;
 export type FareId = "saver" | "standard" | "express";
+// With 10 probes per bucket the smoothed (landed + 1) / (n + 2) tops out at
+// 11/12, so no fare asks for more than 0.9. Probes land in 1 to 2 slots, so
+// only a 1 slot deadline separates the buckets.
 export const FARES: { id: FareId; label: string; deadlineSlots: number; confidence: number }[] = [
   { id: "saver", label: "Saver", deadlineSlots: 10, confidence: 0.8 },
-  { id: "standard", label: "Standard", deadlineSlots: 6, confidence: 0.9 },
-  { id: "express", label: "Express", deadlineSlots: 3, confidence: 0.95 },
+  { id: "standard", label: "Standard", deadlineSlots: 4, confidence: 0.9 },
+  { id: "express", label: "Express", deadlineSlots: 1, confidence: 0.9 },
 ];
 // Fares price the live window without the per-slot trend: per-slot p50 and p90
 // swing by 10x between slots, so any projection made the board jump by 2 to 4x.

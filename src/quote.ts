@@ -77,7 +77,10 @@ export function pickBucket(p: number[], confidence: number, reachable = ALL_REAC
   const open = p.map((v, i) => ({ v, i })).filter((b) => reachable[b.i]);
   const hit = open.find((b) => b.v >= confidence);
   if (hit) return { index: hit.i, meetsConfidence: true };
-  return { index: open.at(-1)?.i ?? p.length - 1, meetsConfidence: false };
+  // Best effort: the cheapest bucket with the highest probability, so a
+  // pricier bucket is never quoted for the same promise.
+  const best = Math.max(...open.map((b) => b.v));
+  return { index: open.find((b) => b.v >= best - 1e-9)?.i ?? p.length - 1, meetsConfidence: false };
 }
 
 function bucketPrice(index: number, horizon: number): number {
