@@ -29,6 +29,13 @@
       "when": 1791412731605,
       "tag": "0003_slot_stats_created_at",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791719442408,
+      "tag": "0004_receipt_fare",
+      "breakpoints": true
     }
   ]
 }

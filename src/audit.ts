@@ -5,6 +5,8 @@ import {
   config,
   JITO_TIP_ACCOUNTS,
   LAMPORTS_PER_SOL,
+  STAMP_OVERPAID_SHARE,
+  STAMP_TOO_LOW_SHARE,
 } from "./config.js";
 import { loadAudit, saveAudit, saveSlots, slotRows } from "./db.js";
 import * as solami from "./solami.js";
@@ -81,10 +83,36 @@ export function analyze(tx: RpcTx, wallet: string, tipAccounts: Set<string>, ben
   };
 }
 
+const MONTH_SEC = 30 * 86_400;
+
+export type Stamp = "overpaid" | "fair" | "too_low";
+
+export function stampOf(totalTips: number, overpay: number, benchmarked: number, underpaid: number): Stamp {
+  if (totalTips > 0 && overpay / totalTips > STAMP_OVERPAID_SHARE) return "overpaid";
+  if (benchmarked > 0 && underpaid / benchmarked > STAMP_TOO_LOW_SHARE) return "too_low";
+  return "fair";
+}
+
 export function summarize(txs: AuditTx[], solPrice: number | null) {
   const tipped = txs.filter((t) => t.tip > 0);
   const overpay = tipped.reduce((a, t) => a + t.overpay, 0);
+  const benchmarked = tipped.filter((t) => t.slotP50 !== null);
+  const totalTips = tipped.reduce((a, t) => a + t.tip, 0);
+  const times = tipped.map((t) => t.blockTime).filter((t): t is number => t !== null);
+  const from = times.length ? Math.min(...times) : null;
+  const to = times.length ? Math.max(...times) : null;
+  const span = from !== null && to !== null ? to - from : 0;
+  const usd = (lamports: number) => (solPrice === null ? null : Math.round((lamports / LAMPORTS_PER_SOL) * solPrice * 100) / 100);
+  const monthly = span >= 60 ? Math.round((overpay / span) * MONTH_SEC) : null;
+  const underpaid = tipped.filter((t) => t.underpaid).length;
   return {
+    periodFrom: from,
+    periodTo: to,
+    totalTipsUsd: usd(totalTips),
+    goingRateLamports: totalTips - overpay,
+    monthlyOverpayLamports: monthly,
+    monthlyOverpayUsd: monthly === null ? null : usd(monthly),
+    stamp: stampOf(totalTips, overpay, benchmarked.length, underpaid),
     analyzed: txs.length,
     tipped: tipped.length,
     benchmarked: tipped.filter((t) => t.slotP50 !== null).length,
@@ -171,7 +199,7 @@ async function benchmarks(slots: number[], tipAccounts: Set<string>, maxBlocks: 
 }
 
 export const tipSet = async () => new Set([...JITO_TIP_ACCOUNTS, ...(await solami.beamTipAddresses())]);
-const solPrice = () => solami.solPriceUsd().catch(() => null);
+const solPrice = async () => solami.solPrice().usd ?? (await solami.solPriceUsd().catch(() => null));
 
 export async function runAudit(address: string, limit: number) {
   const tips = await tipSet();

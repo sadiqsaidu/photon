@@ -1,6 +1,7 @@
 import { SystemProgram, VersionedTransaction } from "@solana/web3.js";
 import bs58 from "bs58";
-import { BEAM_MIN_TIP, BLOCKHASH_VALID_BLOCKS, bus, LEADER_SKIP_SLOTS } from "./config.js";
+import { BEAM_MIN_TIP, BLOCKHASH_VALID_BLOCKS, bus, LEADER_SKIP_SLOTS, type FareId } from "./config.js";
+import { explain } from "./explain.js";
 import type { SlotStatus } from "./grpc.js";
 import { beamRecord, beamSend, rpc, type BeamRecord } from "./solami.js";
 
@@ -9,7 +10,7 @@ export type FailureClass = "send_rejected" | "failed_onchain" | "leader_skipped"
 
 export interface Receipt {
   signature: string;
-  kind: "probe" | "sdk";
+  kind: "probe" | "sdk" | "demo";
   sentSlot: number;
   lastValidBlockHeight: number | null;
   tip: number;
@@ -20,6 +21,23 @@ export interface Receipt {
   beam: BeamRecord | null;
   settled: boolean;
   sentAt: number;
+  fare: FareId | null;
+  quotedProbability: number | null;
+  deadlineSlots: number | null;
+}
+
+export interface FarePromise {
+  fare: FareId;
+  quotedProbability: number;
+  deadlineSlots: number;
+}
+
+export function withExplanation(r: Receipt) {
+  return { ...r, explanation: explain(r) };
+}
+
+function emit(r: Receipt): void {
+  bus.emit("lifecycle", withExplanation(r));
 }
 
 const CONFIRMED_KEEP = 1_000;
@@ -40,7 +58,7 @@ export function onReceiptSettled(fn: (r: Receipt) => void): void {
   onSettled = fn;
 }
 
-export function track(signature: string, kind: Receipt["kind"], sentSlot: number, lastValidBlockHeight: number | null, tip: number): Receipt {
+export function track(signature: string, kind: Receipt["kind"], sentSlot: number, lastValidBlockHeight: number | null, tip: number, promise?: FarePromise): Receipt {
   const r: Receipt = {
     signature,
     kind,
@@ -54,9 +72,12 @@ export function track(signature: string, kind: Receipt["kind"], sentSlot: number
     beam: null,
     settled: false,
     sentAt: Date.now(),
+    fare: promise?.fare ?? null,
+    quotedProbability: promise?.quotedProbability ?? null,
+    deadlineSlots: promise?.deadlineSlots ?? null,
   };
   active.set(signature, r);
-  bus.emit("lifecycle", r);
+  emit(r);
   return r;
 }
 
@@ -68,7 +89,7 @@ export function rejected(r: Receipt, error: string): void {
 function mark(r: Receipt, stage: Stage, slot: number): void {
   if (r.stages[stage]) return;
   r.stages[stage] = { slot, ms: Date.now() - r.sentAt };
-  bus.emit("lifecycle", r);
+  emit(r);
 }
 
 export function onTx(signature: string, slot: number, failed: boolean): void {
@@ -158,7 +179,7 @@ export function onBlockHeight(h: number): void {
 function settle(r: Receipt, failure: FailureClass | null): void {
   if (!active.delete(r.signature)) return;
   r.failure = failure;
-  bus.emit("lifecycle", r);
+  emit(r);
   // Settled only once the Beam landing record is attached, so a receipt read
   // after settling is complete.
   setTimeout(() => {
@@ -167,7 +188,7 @@ function settle(r: Receipt, failure: FailureClass | null): void {
       .catch((e: Error) => console.warn(`[beam] record ${r.signature}: ${e.message}`))
       .finally(() => {
         r.settled = true;
-        bus.emit("lifecycle", r);
+        emit(r);
         onSettled(r);
       });
   }, failure === "send_rejected" ? 0 : BEAM_LOOKUP_DELAY_MS);
@@ -191,7 +212,7 @@ export function beamTipOf(tx: VersionedTransaction, beamTips: Set<string>): numb
   return tip;
 }
 
-export async function submitSigned(base64: string, slot: number, beamTips: Set<string>): Promise<Receipt> {
+export async function submitSigned(base64: string, slot: number, beamTips: Set<string>, promise?: FarePromise): Promise<Receipt> {
   let tx: VersionedTransaction;
   try {
     tx = VersionedTransaction.deserialize(Buffer.from(base64, "base64"));
@@ -202,7 +223,7 @@ export async function submitSigned(base64: string, slot: number, beamTips: Set<s
   if (!sig || sig.every((b) => b === 0)) throw new Error("transaction is not signed");
   const tip = beamTipOf(tx, beamTips);
   if (tip < BEAM_MIN_TIP) throw new Error(`transaction must transfer at least ${BEAM_MIN_TIP} lamports to a Beam tip address (GET /tips/addresses)`);
-  const receipt = track(bs58.encode(sig), "sdk", slot, lastValidHeightOf(tx.message.recentBlockhash), tip);
+  const receipt = track(bs58.encode(sig), "sdk", slot, lastValidHeightOf(tx.message.recentBlockhash), tip, promise);
   try {
     await beamSend(base64);
   } catch (e) {

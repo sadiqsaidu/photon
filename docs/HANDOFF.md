@@ -1,6 +1,6 @@
-# Photon handoff
+# Tipwise handoff
 
-Everything a new session (or person) needs to keep working on Photon. No secrets are in this file or the repository. Git rules are in `CLAUDE.md`: one branch (`claude/wonderful-gates-h1nwcp`), commit after every step and push, never rewrite history.
+Everything a new session (or person) needs to keep working on Tipwise. No secrets are in this file or the repository. Git rules are in `CLAUDE.md`: one branch (`claude/wonderful-gates-h1nwcp`), commit after every step and push, never rewrite history.
 
 ## What each file does
 
@@ -25,7 +25,7 @@ Backend (`src/`, TypeScript strict ESM, run with tsx in development and compiled
 | `db.ts` | Drizzle schema, SSL-aware pool, startup migrator, retention prune, queries. |
 | `server.ts` | node:http router, JSON bodies, SSE with a 15 s heartbeat. |
 | `routes.ts` | Every HTTP route. |
-| `sdk.ts` | Client SDK (`createPhoton`): quote, tipInstruction, send, waitForReceipt. |
+| `sdk.ts` | Client SDK (`createTipwise`): quote, tipInstruction, send, waitForReceipt. |
 | `demo.ts` | `npm run demo`: one quoted, tipped self transfer through the SDK. |
 | `doctor.ts` | `npm run doctor`: checks every Solami product. |
 | `main.ts` | Modes (`serve`, `doctor`, `demo`) and the wiring of streams, probes and storage. |
@@ -60,7 +60,7 @@ WebSocket close codes: 4029 stream limit, 4002 bandwidth and balance empty, 1001
 - **grpc-js flow-control window.** The default 64 KB HTTP/2 window capped a long-haul stream (sandbox to Amsterdam) below the tip feed's rate, and the stream fell hundreds of slots behind with idle CPU. `grpc-node.flow_control_window: 16 MiB` fixed it.
 - **Backpressure.** Solami closes a subscription whose client reads too slowly (the server-side buffer fills). The data callback now only enqueues; a worker processes in 8 ms slices. Protobuf decoding itself still happens inside grpc-js.
 - **`failed: true` semantics.** In Yellowstone it means failed transactions only, not "include failed". Leave it unset for both, `false` for successful only. Our first wallet filter used `true` and received nothing, which looked like a Solami bug but was ours.
-- **Wallet filter.** Lifecycle tracking does not use a wallet filter at all: every Photon send carries a Beam tip, so the tip-account filter sees it; failed ones come from a status-only filter on Beam tip addresses.
+- **Wallet filter.** Lifecycle tracking does not use a wallet filter at all: every Tipwise send carries a Beam tip, so the tip-account filter sees it; failed ones come from a status-only filter on Beam tip addresses.
 - **Version 1 transactions.** About half of recent transactions touching Jito tip accounts are v1. RPC refuses them unless `maxSupportedTransactionVersion: 1`. The JSON shape matches v0 plus `transactionConfig`. `@solana/web3.js` 1.x cannot deserialize v1, so `POST /send` accepts legacy and v0 only.
 - **`getBlock` rejects `transactionDetails: "accounts"`** (`-32602 unknown transactionDetails`). The audit reads `"full"` blocks (0.3 to 1.3 s each).
 - **yellowstone-grpc versions.** 5.0.0 is published without its build output; 6 and later use a native Rust client that does not go through the proxy. Pinned to 4.0.2 (grpc-js), loaded through `createRequire` because the ESM default export is not typed as a class.
@@ -94,7 +94,7 @@ WebSocket close codes: 4029 stream limit, 4002 bandwidth and balance empty, 1001
 - 10 minute verification of the compiled server (`npm start`, `PROBE_LIMIT=3`): gRPC 1.67 MB/s, Blur swaps 0.09 MB/s, Blur events 0.001 MB/s, Mirage 0.001 MB/s, webhooks 0.013 MB/s; max 1 slot behind chain tip; gRPC queue peak 1 of 50,000, nothing shed; 0 backpressure closures; one routine reconnect on Blur events; 3 probes landed through Beam (+2, +4, +5 slots).
 - CPU and memory: about 21% of one core and about 280 MB RSS with the heap capped (no watched wallets). Watching a busy bot wallet adds roughly a third more CPU (about 27 `getTransaction` calls per second). Render's free 0.1 CPU is not enough; use a 0.5 CPU instance or a small VM.
 - Probes: 22 sent in total, 21 landed; calibrated buckets so far p0 to 25: 5, p25 to 50: 6, p50 to 75: 8 (10 each needed). Landed spend 4,558,892 lamports; the budget counter, which also counts the one probe of unknown outcome, shows 4,863,912 spent of 24,000,000.
-- The Phase 4 test webhook (`photon-audit`, watching a high-frequency bot) was deleted to save CPU; the next "watch live" recreates it.
+- The Phase 4 test webhook (watching a high-frequency bot) was deleted to save CPU; the next "watch live" recreates it.
 - The Mainnet proof table in the README has placeholders for the hosted run.
 
 ## Known limitations and ideas for later

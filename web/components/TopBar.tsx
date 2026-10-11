@@ -48,7 +48,7 @@ export function TopBar({ live }: { live: Live }) {
   return (
     <header className="panel topbar">
       <div className="brand">
-        PHOTON <span className="faint" style={{ fontWeight: 400, letterSpacing: 0 }}>tip oracle with receipts</span>
+        TIPWISE <span className="faint" style={{ fontWeight: 400, letterSpacing: 0 }}>tip oracle with receipts</span>
         <div style={{ fontWeight: 400, letterSpacing: 0, marginTop: 4, fontSize: 12 }}>
           <Link href="/">weather</Link> <span className="faint">/</span> <Link href="/audit">tip audit</Link>
         </div>

@@ -1,5 +1,5 @@
 import https from "node:https";
-import { config, requireApiKey, SOL_MINT } from "./config.js";
+import { config, LEGACY_LABELS, MIRAGE_LABEL, requireApiKey, SOL_MINT } from "./config.js";
 
 export class SolamiError extends Error {
   constructor(
@@ -123,6 +123,17 @@ export function leaderNow(): Promise<LeaderNow> {
   return api<LeaderNow>("/leader-tracking/current", { product: "leader-tracking" });
 }
 
+let price: { usd: number; at: number } | null = null;
+
+export function solPrice(): { usd: number | null; ageMs: number | null } {
+  return price ? { usd: price.usd, ageMs: Date.now() - price.at } : { usd: null, ageMs: null };
+}
+
+export async function refreshSolPrice(): Promise<void> {
+  const usd = await solPriceUsd();
+  if (usd !== null) price = { usd, at: Date.now() };
+}
+
 export async function solPriceUsd(): Promise<number | null> {
   const rows = await api<{ mint: string; price_usd: string }[]>(`/data/token/price?chain=solana&address=${SOL_MINT}`, {
     auth: "key",
@@ -174,6 +185,10 @@ export function webhookUpdate(body: Record<string, unknown>): Promise<Webhook> {
   return api<Webhook>("/webhooks/update", { auth: "bearer", body });
 }
 
+export function webhookDelete(id: string): Promise<unknown> {
+  return api<unknown>("/webhooks/delete", { auth: "bearer", body: { id } });
+}
+
 export interface MirageSubscription {
   id: string;
   label: string;
@@ -187,8 +202,15 @@ function mirageCreate(label: string, filter: Record<string, unknown>): Promise<M
   return api<MirageSubscription>("/mirage/create", { auth: "bearer", body: { label, filter } });
 }
 
+// Subscriptions from before the rename are deleted first, so the plan's
+// subscription limit never counts a duplicate.
 export async function mirageSlotSubscription(): Promise<string> {
-  const existing = (await mirageList()).find((s) => s.label === "photon-slots");
+  const list = await mirageList();
+  for (const old of list.filter((s) => s.label === LEGACY_LABELS.mirage)) {
+    await api<unknown>("/mirage/delete", { auth: "bearer", body: { id: old.id } });
+    console.log(`[mirage] deleted legacy subscription ${old.id}`);
+  }
+  const existing = list.find((s) => s.label === MIRAGE_LABEL);
   if (existing) return existing.id;
-  return (await mirageCreate("photon-slots", { slots: true, commitment: "processed" })).id;
+  return (await mirageCreate(MIRAGE_LABEL, { slots: true, commitment: "processed" })).id;
 }

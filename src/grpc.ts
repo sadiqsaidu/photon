@@ -39,9 +39,9 @@ const WARN_EVERY_MS = 30_000;
 // Solami replays at most 3,500 slots; past that a resume would be refused.
 const REPLAY_WINDOW_MS = 15 * 60_000;
 
-// Every transaction Photon sends carries a Beam tip, so the tip filters also
+// Every transaction Tipwise sends carries a Beam tip, so the tip filters also
 // drive lifecycle tracking. Successful transactions arrive in full (balances
-// give the tip); failed ones are needed only for Photon's own sends, so they
+// give the tip); failed ones are needed only for Tipwise's own sends, so they
 // come as status-only updates and only for Beam tip addresses. In Yellowstone
 // `failed: true` means failed transactions only.
 function request(tipAccounts: string[], beamTips: string[], fromSlot: number): SubscribeRequest {

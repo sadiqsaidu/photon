@@ -1,12 +1,11 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { analyze, summarize, tipSet, TX_VERSION, type Audit, type RpcTx } from "./audit.js";
-import { bus, config } from "./config.js";
+import { bus, config, LEGACY_LABELS, WEBHOOK_LABEL } from "./config.js";
 import { loadAudit, saveAudit, slotRows } from "./db.js";
 import * as solami from "./solami.js";
 import { supervise, wsSession, type StreamHealth } from "./stream.js";
 import { confirmedRow, type SlotStats } from "./tips.js";
 
-const HOOK_LABEL = "photon-audit";
 
 // Live audits: one stream-mode webhook (enriched transfer events) covers every
 // watched wallet. Events are deduplicated by signature (one arrives per
@@ -104,8 +103,17 @@ export function webhookHealth(): StreamHealth | null {
   return hookStream;
 }
 
+export function watchedCount(): number {
+  return live.size;
+}
+
 export async function resumeWebhook(): Promise<void> {
-  hook = (await solami.webhookList()).find((h) => h.label === HOOK_LABEL) ?? null;
+  const hooks = await solami.webhookList();
+  for (const old of hooks.filter((h) => h.label === LEGACY_LABELS.webhook)) {
+    await solami.webhookDelete(old.id);
+    console.log(`[webhooks] deleted legacy webhook ${old.id}`);
+  }
+  hook = hooks.find((h) => h.label === WEBHOOK_LABEL) ?? null;
   for (const address of hook?.addresses ?? []) {
     const audit = (await loadAudit(address)) as Audit | null;
     if (audit) live.set(address, { ...audit, watching: true });
@@ -118,7 +126,7 @@ export async function watchWallet(address: string) {
   const url = config.webhookPublicUrl ? `${config.webhookPublicUrl.replace(/\/$/, "")}/webhooks/solami` : "";
   if (!hook) {
     hook = await solami.webhookCreate({
-      label: HOOK_LABEL, addresses: [address], stream: true, url, event_types: ["transfer"], payload_kind: "enriched", region: solami.webhookRegion,
+      label: WEBHOOK_LABEL, addresses: [address], stream: true, url, event_types: ["transfer"], payload_kind: "enriched", region: solami.webhookRegion,
     });
     hookSecret = hook.secret ?? null;
   } else if (!hook.addresses.includes(address)) {

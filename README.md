@@ -1,28 +1,28 @@
-# Photon
+# Tipwise
 
-**A Solana tip oracle with receipts.** Every bot guesses its tip. Photon turns the guess into a quote, sends through Solami Beam, and proves the quote was right.
+**A Solana tip oracle with receipts.** Every bot guesses its tip. Tipwise turns the guess into a quote, sends through Solami Beam, and proves the quote was right.
 
-Landing a transaction on Solana means paying a tip on top of the fee, and nobody tells you how much is enough. Bots hardcode a number, overpay when the chain is quiet and lose the race when it is busy. Photon measures every landed tip in every slot from a Yellowstone gRPC stream, prices a tip for a deadline and a confidence you choose, sends through Beam, follows the transaction to finalized, and keeps score of how often its predictions were right.
+Landing a transaction on Solana means paying a tip on top of the fee, and nobody tells you how much is enough. Bots hardcode a number, overpay when the chain is quiet and lose the race when it is busy. Tipwise measures every landed tip in every slot from a Yellowstone gRPC stream, prices a tip for a deadline and a confidence you choose, sends through Beam, follows the transaction to finalized, and keeps score of how often its predictions were right.
 
 ## A real user story
 
-A solo developer runs a bot that buys tokens right after a pump.fun graduation, with a hardcoded tip of 0.002 SOL. Photon's Tip Audit shows that during quiet periods the tip sat far above the median landed tip of its slot (money left on the table), and during the busiest launches it fell below the slot's 25th percentile (lost races). The developer replaces the constant with `quote()` and `send()`: the tip now follows the live market, every send comes back with a receipt, and the dashboard shows whether the predicted landing probability held up.
+A solo developer runs a bot that buys tokens right after a pump.fun graduation, with a hardcoded tip of 0.002 SOL. Tipwise's Tip Audit shows that during quiet periods the tip sat far above the median landed tip of its slot (money left on the table), and during the busiest launches it fell below the slot's 25th percentile (lost races). The developer replaces the constant with `quote()` and `send()`: the tip now follows the live market, every send comes back with a receipt, and the dashboard shows whether the predicted landing probability held up.
 
 ## What it does
 
 1. **Quote and send SDK.** `quote({ deadlineSlots, confidence })` returns a tip in lamports, a priority fee, the predicted probability of landing within the deadline, and whether the landing model is calibrated yet. `send(signedTx)` submits through Beam, tracks the transaction through processed, confirmed and finalized, and returns a receipt with the landed slot, per-stage latency, the Beam landing record, or a typed failure class.
-2. **Tip Audit.** Enter any wallet. Photon pulls its recent transactions, finds the tip each one paid, compares it with the tips that landed in the same slot, and reports total tips, estimated overpay and underpaid transactions. "Watch live" registers the wallet on a Solami webhook and updates the audit as new transactions land.
+2. **Tip Audit.** Enter any wallet. Tipwise pulls its recent transactions, finds the tip each one paid, compares it with the tips that landed in the same slot, and reports total tips, estimated overpay and underpaid transactions. "Watch live" registers the wallet on a Solami webhook and updates the audit as new transactions land.
 3. **Block-space weather dashboard.** Live per-slot tip surface with a forecast, Blur market heat on an aligned strip, the measured lead or lag between heat and tips, a live quote widget, a calibration chart, probe lanes, upcoming leaders, and stream health (bandwidth, queue depth, reconnects, backpressure closures).
 
 ## How Solami is used
 
-| Product | What Photon does with it |
+| Product | What Tipwise does with it |
 | --- | --- |
-| Yellowstone gRPC | One subscription: slots (processed, confirmed, finalized), block meta (blockhash and block height), every successful transaction touching any of the 8 Jito tip accounts or the 15 Beam tip addresses (the landed tip distribution per slot, and lifecycle tracking for Photon's own sends), and status-only updates for failed transactions touching Beam tip addresses (`failed_onchain`). Reconnects resume with `from_slot`. Updates pass through a bounded queue so a slow moment never backs up Solami's server-side buffer. |
+| Yellowstone gRPC | One subscription: slots (processed, confirmed, finalized), block meta (blockhash and block height), every successful transaction touching any of the 8 Jito tip accounts or the 15 Beam tip addresses (the landed tip distribution per slot, and lifecycle tracking for Tipwise's own sends), and status-only updates for failed transactions touching Beam tip addresses (`failed_onchain`). Reconnects resume with `from_slot`. Updates pass through a bounded queue so a slow moment never backs up Solami's server-side buffer. |
 | Mirage | The same slot stream over a plain WebSocket (a saved Mirage subscription), raced against gRPC: wins per source and the median lead. |
 | Blur (WebSocket) | Decoded market events: swaps of $100 or more, token creations, pool creations, graduations and surges, weighted into a per-slot heat signal. |
 | Beam | Every probe and every SDK send goes out as `sendTransaction` on Solami RPC with a transfer to a Beam tip address, which routes it through Beam. Tip addresses come from `GET /onchain/tip-addresses`; each receipt carries the landing record from `GET /swqos/tx/{signature}`. |
-| RPC | `getSlotLeaders` (leader table), `getRecentPrioritizationFees` (priority fee), `getLatestBlockhash` (fallback), `getSignatureStatuses` (expiry double check and restart recovery), `getBlock` (audit benchmarks for slots Photon did not stream), `getTransaction`, `getBalance`. |
+| RPC | `getSlotLeaders` (leader table), `getRecentPrioritizationFees` (priority fee), `getLatestBlockhash` (fallback), `getSignatureStatuses` (expiry double check and restart recovery), `getBlock` (audit benchmarks for slots Tipwise did not stream), `getTransaction`, `getBalance`. |
 | Data API | `getTransactionsForAddress` (Solami's paginated wallet history RPC method) for the audit, falling back to `getSignaturesForAddress` plus `getTransaction`; `GET /data/token/price` for the SOL price in USD. |
 | Webhooks | One stream-mode webhook (enriched transfer events) for every watched wallet, consumed over `wss://{region}.ws.solami.dev/webhooks/stream/{id}`; HTTP delivery with HMAC verification is supported when a public URL is configured. |
 | Leader tracking | `GET /leader-tracking/current` every 2 s: the chain tip, so the dashboard shows how many slots the stream is behind. |
@@ -32,8 +32,8 @@ A solo developer runs a bot that buys tokens right after a pump.fun graduation, 
 Requires Node 20.12 or newer and Docker (or any Postgres 14+).
 
 ```bash
-git clone https://github.com/sadiqsaidu/photon.git
-cd photon
+git clone https://github.com/sadiqsaidu/tipwise.git
+cd tipwise
 npm install
 cp .env.example .env          # add SOLAMI_API_KEY, optionally PROBE_SECRET
 docker compose up -d db
@@ -53,7 +53,7 @@ npm run dev                   # http://localhost:3000
 
 ## Getting a key
 
-Sign up at https://solami.dev/signup?ref=st-earn-sep-26. The Pro trial covers everything Photon uses.
+Sign up at https://solami.dev/signup?ref=st-earn-sep-26. The Pro trial covers everything Tipwise uses.
 
 Create a standard API key (`sk_...`) in the dashboard and give it a role with these permissions:
 
@@ -70,13 +70,13 @@ Beam over RPC needs no separate swQoS key. Put the key in `SOLAMI_API_KEY` and p
 | --- | --- | --- | --- |
 | `SOLAMI_API_KEY` | yes | | Solami standard API key. |
 | `SOLAMI_REGION` | no | `ams` | `ams`, `fra`, `nyc` or `global`. Prefixes every Solami hostname. |
-| `DATABASE_URL` | no | `postgres://photon:photon@localhost:5432/photon` | Postgres URL. `?sslmode=require` encrypts without verifying the certificate (Supabase); `verify-full` verifies. |
+| `DATABASE_URL` | no | `postgres://tipwise:tipwise@localhost:5432/tipwise` | Postgres URL. `?sslmode=require` encrypts without verifying the certificate (Supabase); `verify-full` verifies. |
 | `PORT` | no | `8080` | HTTP port (binds 0.0.0.0). |
 | `PROBE_SECRET` | no | | Base58 secret key of a funded burner wallet. Enables probes and `npm run demo`. |
 | `PROBE_INTERVAL_SEC` | no | `60` | Seconds between probes. |
 | `PROBE_BUDGET_SOL` | no | `0.05` | Total SOL probes may ever spend (tracked in Postgres). Also capped by the wallet balance minus a rent reserve. |
 | `PROBE_LIMIT` | no | `0` | Max probes one process sends; 0 means until calibrated or out of budget. |
-| `TIP_CEILING_LAMPORTS` | no | `1000000` | Highest tip Photon will quote or probe. |
+| `TIP_CEILING_LAMPORTS` | no | `1000000` | Highest tip Tipwise will quote or probe. |
 | `AUDIT_MAX_BLOCKS` | no | `40` | Max `getBlock` calls per audit for slots without stored stats. |
 | `WEBHOOK_PUBLIC_URL` | no | | Public base URL of this server. When set, webhooks also POST to `/webhooks/solami` (HMAC verified). |
 | `NEXT_PUBLIC_API_BASE` | web | `http://localhost:8080` | Backend URL for the dashboard (`web/.env.local`). |
@@ -98,10 +98,10 @@ Beam over RPC needs no separate swQoS key. Put the key in `SOLAMI_API_KEY` and p
 
 ```ts
 import { ComputeBudgetProgram, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
-import { createPhoton } from "./sdk.js";
+import { createTipwise } from "./sdk.js";
 
-const photon = createPhoton("https://your-photon-host");
-const quote = await photon.quote({ deadlineSlots: 2, confidence: 0.9 });
+const tipwise = createTipwise("https://your-tipwise-host");
+const quote = await tipwise.quote({ deadlineSlots: 2, confidence: 0.9 });
 
 const message = new TransactionMessage({
   payerKey: wallet.publicKey,
@@ -109,14 +109,14 @@ const message = new TransactionMessage({
   instructions: [
     ComputeBudgetProgram.setComputeUnitPrice({ microLamports: quote.priorityFeeMicroLamports }),
     ...yourInstructions,
-    await photon.tipInstruction(wallet.publicKey, quote.tipLamports),
+    await tipwise.tipInstruction(wallet.publicKey, quote.tipLamports),
   ],
 }).compileToV0Message();
 const tx = new VersionedTransaction(message);
 tx.sign([wallet]);
 
-const signature = await photon.send(tx);
-const receipt = await photon.waitForReceipt(signature);
+const signature = await tipwise.send(tx);
+const receipt = await tipwise.waitForReceipt(signature);
 console.log(receipt.failure ?? `landed in slot ${receipt.landedSlot}`, receipt.stages, receipt.beam);
 ```
 
@@ -142,21 +142,21 @@ The Solami key never leaves the server.
 
 ## Methodology
 
-**Tips.** For every successful transaction that touches a tip account, the tip is the post balance minus the pre balance of that account (lookup-table loaded accounts included). Tips are grouped by slot; when gRPC reports the slot confirmed, Photon computes count, p25, p50, p75, p90 and max, keeps the last 600 slots in memory, and writes one row per finalized slot to Postgres (batched every 2 s). Tips are tagged `jito` or `beam`.
+**Tips.** For every successful transaction that touches a tip account, the tip is the post balance minus the pre balance of that account (lookup-table loaded accounts included). Tips are grouped by slot; when gRPC reports the slot confirmed, Tipwise computes count, p25, p50, p75, p90 and max, keeps the last 600 slots in memory, and writes one row per finalized slot to Postgres (batched every 2 s). Tips are tagged `jito` or `beam`.
 
 **The Beam floor.** Beam rejects tips below 100,000 lamports, which sits around the 90th percentile of all landed tips. Quotes therefore price inside the tips a Beam send could actually pay: landed tips at or above the floor (from Beam tips alone once there are 200 in the window). The API and dashboard show where the floor sits in the full distribution.
 
-**Heat and the lag test.** Each Blur event adds to its slot's heat (swap 1, token creation 3, pool creation 5, surge 5, graduation 10); events without a slot use the latest processed slot. Heat counts swaps of $100 or more, which cuts Blur bandwidth by about 85%. Every 30 s Photon computes the Pearson correlation between heat at slot t and tip p75 at slot t+k for k from 0 to 20 over the last 900 slots, and publishes the best k and r. The forecast uses heat only when r is at least 0.2 and k at least 1. The dashboard shows the result either way, including "no lead detected".
+**Heat and the lag test.** Each Blur event adds to its slot's heat (swap 1, token creation 3, pool creation 5, surge 5, graduation 10); events without a slot use the latest processed slot. Heat counts swaps of $100 or more, which cuts Blur bandwidth by about 85%. Every 30 s Tipwise computes the Pearson correlation between heat at slot t and tip p75 at slot t+k for k from 0 to 20 over the last 900 slots, and publishes the best k and r. The forecast uses heat only when r is at least 0.2 and k at least 1. The dashboard shows the result either way, including "no lead detected".
 
 **Forecast.** Holt double exponential smoothing on per-slot p50 and p90, projected h slots ahead. When the heat signal qualifies, the projection is multiplied by `1 + beta * z(heat now)`, with beta fitted by least squares on the window and the multiplier clamped to [0.8, 2.0].
 
-**Landing model and quote.** Every probe records its tip, the tip's percentile in the distribution at send time, the predicted probability, and the slots from send to land. Probes fall into five percentile buckets (0 to 25, 25 to 50, 50 to 75, 75 to 90, 90 to 100). For a deadline D, P(bucket) = (landed within D + 1) / (n + 2), made non-decreasing across buckets. A bucket is reachable when some tip at or below `TIP_CEILING_LAMPORTS` falls inside it; buckets above the ceiling are reported as "above tip ceiling" and never quoted or probed. The quote is the cheapest reachable bucket whose probability meets the requested confidence, priced at the forecast of that bucket's upper percentile h = D slots ahead, floored at the Beam minimum and capped at the ceiling. If none qualifies, the top reachable bucket is returned with its real probability and `meetsConfidence: false`. Until every reachable bucket has 10 probes, Photon uses priors (0.5, 0.65, 0.8, 0.9, 0.95) and returns `calibrated: false`. The priority fee is p75 of `getRecentPrioritizationFees`, cached 10 s.
+**Landing model and quote.** Every probe records its tip, the tip's percentile in the distribution at send time, the predicted probability, and the slots from send to land. Probes fall into five percentile buckets (0 to 25, 25 to 50, 50 to 75, 75 to 90, 90 to 100). For a deadline D, P(bucket) = (landed within D + 1) / (n + 2), made non-decreasing across buckets. A bucket is reachable when some tip at or below `TIP_CEILING_LAMPORTS` falls inside it; buckets above the ceiling are reported as "above tip ceiling" and never quoted or probed. The quote is the cheapest reachable bucket whose probability meets the requested confidence, priced at the forecast of that bucket's upper percentile h = D slots ahead, floored at the Beam minimum and capped at the ceiling. If none qualifies, the top reachable bucket is returned with its real probability and `meetsConfidence: false`. Until every reachable bucket has 10 probes, Tipwise uses priors (0.5, 0.65, 0.8, 0.9, 0.95) and returns `calibrated: false`. The priority fee is p75 of `getRecentPrioritizationFees`, cached 10 s.
 
-**Probes.** With `PROBE_SECRET` set, Photon sends one probe every `PROBE_INTERVAL_SEC`: a compute unit price, a `photon-probe` memo and a tip to a random Beam tip address. Each probe targets the least-sampled reachable bucket (ties at random) with the tip whose mid-rank falls inside that bucket, closest to its middle. Many tips are exactly 100,000 lamports, so a plain midpoint can land in the neighbouring bucket; the mid-rank search avoids that. Before the first send Photon simulates the whole run (every probe until each reachable bucket has 10, or `PROBE_LIMIT`) and does not start if its cost exceeds the budget left. Probing stops when the reachable buckets are full or the budget is spent; spend is stored in Postgres, so a restart cannot overspend.
+**Probes.** With `PROBE_SECRET` set, Tipwise sends one probe every `PROBE_INTERVAL_SEC`: a compute unit price, a `tipwise-probe` memo and a tip to a random Beam tip address. Each probe targets the least-sampled reachable bucket (ties at random) with the tip whose mid-rank falls inside that bucket, closest to its middle. Many tips are exactly 100,000 lamports, so a plain midpoint can land in the neighbouring bucket; the mid-rank search avoids that. Before the first send Tipwise simulates the whole run (every probe until each reachable bucket has 10, or `PROBE_LIMIT`) and does not start if its cost exceeds the budget left. Probing stops when the reachable buckets are full or the budget is spent; spend is stored in Postgres, so a restart cannot overspend.
 
-**Failure classes.** `send_rejected`: Beam returned an error at send time. `failed_onchain`: the transaction landed with an error. `leader_skipped`: not landed before expiry, and one of the first 4 slots after the send never confirmed while a later slot did. `expired_blockhash`: not landed and the streamed block height passed the blockhash's last valid block height (never decided on wall clock). Before either of the last two, Photon makes one `getSignatureStatuses` check in case the stream missed the landing. After settling, the Beam landing record is attached to the receipt.
+**Failure classes.** `send_rejected`: Beam returned an error at send time. `failed_onchain`: the transaction landed with an error. `leader_skipped`: not landed before expiry, and one of the first 4 slots after the send never confirmed while a later slot did. `expired_blockhash`: not landed and the streamed block height passed the blockhash's last valid block height (never decided on wall clock). Before either of the last two, Tipwise makes one `getSignatureStatuses` check in case the stream missed the landing. After settling, the Beam landing record is attached to the receipt.
 
-**Audit math.** For each transaction: tip paid is the sum of System transfers from the wallet to any Jito or Beam tip address (cross-program transfers included), priority fee is the fee minus 5,000 lamports per signature. The slot benchmark comes from stored slot stats, or from `getBlock` for slots Photon did not stream (concurrency 8, at most `AUDIT_MAX_BLOCKS` per audit). Overpay is `max(0, tip - slot p50)`; a transaction is underpaid when its tip is below the slot's p25. **Overpay is an estimate against the slot median**, not a claim that a smaller tip would have landed.
+**Audit math.** For each transaction: tip paid is the sum of System transfers from the wallet to any Jito or Beam tip address (cross-program transfers included), priority fee is the fee minus 5,000 lamports per signature. The slot benchmark comes from stored slot stats, or from `getBlock` for slots Tipwise did not stream (concurrency 8, at most `AUDIT_MAX_BLOCKS` per audit). Overpay is `max(0, tip - slot p50)`; a transaction is underpaid when its tip is below the slot's p25. **Overpay is an estimate against the slot median**, not a claim that a smaller tip would have landed.
 
 ## Costs
 
@@ -233,7 +233,7 @@ Three earlier probes (EqKpkPk8..., 44nHNaWu..., jJLJr9b2...) were sent while the
 
 The backend needs long-lived gRPC and WebSocket connections, so it runs as a web service, not as serverless functions.
 
-**Postgres on Supabase (free).** Create a project in Frankfurt and copy the Session pooler connection string (IPv4; the direct connection is IPv6 only). Append `?sslmode=require`. Photon migrates the schema at startup and prunes itself to 3 days of slot rows and 200 audits, staying well under the 500 MB free limit.
+**Postgres on Supabase (free).** Create a project in Frankfurt and copy the Session pooler connection string (IPv4; the direct connection is IPv6 only). Append `?sslmode=require`. Tipwise migrates the schema at startup and prunes itself to 3 days of slot rows and 200 audits, staying well under the 500 MB free limit.
 
 **API on Render (free, Frankfurt).** `render.yaml` defines the service. In Render, create a Blueprint from the repository, then fill the environment variables (all `sync: false`): `SOLAMI_API_KEY`, `SOLAMI_REGION` (`fra`), `DATABASE_URL`, and optionally `PROBE_SECRET`, `PROBE_BUDGET_SOL`, `PROBE_INTERVAL_SEC`, `PROBE_LIMIT`, `TIP_CEILING_LAMPORTS`, `AUDIT_MAX_BLOCKS`, `WEBHOOK_PUBLIC_URL`.
 
@@ -249,7 +249,7 @@ Render's free plan sleeps a service after 15 minutes without inbound requests, w
 
 - **Calibrated** means every bucket a tip at or below `TIP_CEILING_LAMPORTS` can reach has 10 probes. Reachability is decided from the live distribution: with the 1,000,000 lamport ceiling the p90 to 100 bucket of tips above the Beam floor is above the ceiling, and p75 to 90 often is too (in busy hours). Buckets above the ceiling are reported as "above tip ceiling", never quoted, never probed, and do not count toward calibration, so the calibrated state can change as the market moves.
 - Beam usually lands in 3 to 6 slots at these tips, so for a 2 slot deadline the model will mostly learn that it cannot promise high confidence.
-- Overpay is an estimate against the slot median; Photon cannot know whether a smaller tip would have landed.
+- Overpay is an estimate against the slot median; Tipwise cannot know whether a smaller tip would have landed.
 - Beam tips are a small share of landed tips (one in several hundred slots), so quotes almost always use the combined distribution above the floor.
 - Heat counts swaps of $100 or more, and in the measured windows heat did not reliably lead tips; the forecast only uses heat when the lag test qualifies.
 - Skipped leader slots are inferred from gaps between finalized slots; none were observed in thousands of consecutive slots during development.

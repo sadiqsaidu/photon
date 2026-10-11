@@ -6,6 +6,10 @@ import {
   HEAT_MULT_MIN,
   LAG_MAX_K,
   LAG_WINDOW_SLOTS,
+  MOOD_QUIET_BELOW,
+  MOOD_RECENT_SLOTS,
+  MOOD_RUSH_ABOVE,
+  PAYER_WINDOW_MS,
   TIP_WINDOW_SLOTS,
 } from "./config.js";
 import type { Tip, TipSource } from "./grpc.js";
@@ -51,8 +55,49 @@ export function seedWindow(rows: SlotStats[]): void {
   recent.sort((a, b) => a.slot - b.slot);
 }
 
+// Fee payers of landed tips over a rolling window, for live example wallets.
+const payerLog: { at: number; payer: string; slot: number }[] = [];
+const payerCounts = new Map<string, { tips: number; lastSlot: number }>();
+let tipsLastMinute: number[] = [];
+
+function logPayer(payer: string, slot: number, now = Date.now()): void {
+  payerLog.push({ at: now, payer, slot });
+  const c = payerCounts.get(payer);
+  if (c) {
+    c.tips++;
+    c.lastSlot = Math.max(c.lastSlot, slot);
+  } else payerCounts.set(payer, { tips: 1, lastSlot: slot });
+  while (payerLog.length && (payerLog[0] as { at: number }).at < now - PAYER_WINDOW_MS) {
+    const old = payerLog.shift() as { payer: string };
+    const oc = payerCounts.get(old.payer) as { tips: number };
+    if (--oc.tips <= 0) payerCounts.delete(old.payer);
+  }
+}
+
+export function rankPayers(counts: Map<string, { tips: number; lastSlot: number }>, exclude: Set<string>, n: number) {
+  return [...counts]
+    .filter(([address]) => !exclude.has(address))
+    .sort((a, b) => b[1].tips - a[1].tips || b[1].lastSlot - a[1].lastSlot)
+    .slice(0, n)
+    .map(([address, c]) => ({ address, tips: c.tips, lastSlot: c.lastSlot }));
+}
+
+export function topPayers(exclude: Set<string>, n: number) {
+  return rankPayers(payerCounts, exclude, n);
+}
+
+export function tipsPerMinute(now = Date.now()): number {
+  tipsLastMinute = tipsLastMinute.filter((t) => t > now - 60_000);
+  return tipsLastMinute.length;
+}
+
 export function addTip(tip: Tip): void {
   if (tip.slot <= lastConfirmed - TIP_WINDOW_SLOTS) return;
+  if (pending.get(tip.slot)?.has(tip.signature)) return;
+  const now = Date.now();
+  logPayer(tip.payer, tip.slot, now);
+  tipsLastMinute.push(now);
+  if (tipsLastMinute.length > 20_000) tipsPerMinute(now);
   let slot = pending.get(tip.slot);
   if (!slot) pending.set(tip.slot, (slot = new Map()));
   slot.set(tip.signature, tip);
@@ -66,8 +111,8 @@ export function addHeat(slot: number, weight: number): void {
 const DOTS_PER_SLOT = 12;
 
 // An even spread of one slot's landed tips, for the dashboard scatter.
-function dotsOf(slot: number): number[] {
-  const values = (samples.get(slot) ?? []).map((t) => t.lamports).sort((a, b) => a - b);
+function dotsOf(slot: number, source?: TipSource): number[] {
+  const values = (samples.get(slot) ?? []).filter((t) => !source || t.source === source).map((t) => t.lamports).sort((a, b) => a - b);
   if (values.length <= DOTS_PER_SLOT) return values;
   return Array.from({ length: DOTS_PER_SLOT }, (_, i) => values[Math.round((i * (values.length - 1)) / (DOTS_PER_SLOT - 1))] as number);
 }
@@ -121,7 +166,7 @@ export function onConfirmed(slot: number): SlotStats | null {
   for (const list of samples.values()) for (const t of list) (t.source === "beam" ? beam : all).push(t.lamports);
   const combined = all.concat(beam).sort((a, b) => a - b);
   sorted = { all: combined, beam: beam.sort((a, b) => a - b), eligible: combined.filter((v) => v >= BEAM_MIN_TIP) };
-  bus.emit("tips", { ...stats, dots: dotsOf(slot) });
+  bus.emit("tips", windowRow(stats));
   return stats;
 }
 
@@ -173,11 +218,43 @@ function projected(f: ReturnType<typeof holt>, h: number): number {
   return Math.round((f.level() ?? 0) * f.growth(h) * heatMultiplier());
 }
 
+export type Mood = "quiet" | "busy" | "rush";
+
+// Median landed tip of the newest slots against the whole window.
+export function moodOf(recentMedian: number, windowMedian: number): { mood: Mood; ratio: number } {
+  if (!(recentMedian > 0) || !(windowMedian > 0)) return { mood: "busy", ratio: 1 };
+  const ratio = Math.round((recentMedian / windowMedian) * 100) / 100;
+  return { mood: ratio < MOOD_QUIET_BELOW ? "quiet" : ratio > MOOD_RUSH_ABOVE ? "rush" : "busy", ratio };
+}
+
+export function mood(): { mood: Mood; ratio: number } {
+  const since = lastConfirmed - MOOD_RECENT_SLOTS;
+  const newest: number[] = [];
+  for (const [slot, list] of samples) if (slot > since) for (const t of list) newest.push(t.lamports);
+  return moodOf(percentile(newest.sort((a, b) => a - b), 50), percentile(sorted.all, 50));
+}
+
+function windowRow(r: SlotStats) {
+  return {
+    slot: r.slot,
+    count: r.count,
+    p25: r.p25,
+    p50: r.p50,
+    p75: r.p75,
+    p90: r.p90,
+    max: r.max,
+    heat: heatAt(r.slot),
+    dots: dotsOf(r.slot),
+    beam: dotsOf(r.slot, "beam"),
+  };
+}
+
 export function tipState() {
   const d = distribution();
   return {
     lastConfirmed,
-    window: recent.slice(-150).map((r) => ({ ...r, heat: heatAt(r.slot), dots: dotsOf(r.slot) })),
+    window: recent.slice(-TIP_WINDOW_SLOTS).map(windowRow),
+    mood: mood(),
     lag,
     heatMultiplier: heatMultiplier(),
     source: d.source,

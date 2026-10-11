@@ -13,6 +13,8 @@ import {
   BUCKETS,
   bus,
   config,
+  DEMO_MEMO,
+  type FareId,
   LAMPORTS_PER_SOL,
   MEMO_PROGRAM,
   MIN_BUCKET_PROBES,
@@ -44,6 +46,8 @@ const records = new Map<string, ProbeRecord>();
 let budget = Math.round(config.probeBudgetSol * LAMPORTS_PER_SOL);
 let stopped = false;
 let stopReason: string | null = null;
+const demoDay = { day: "", count: 0 };
+const utcDay = (t = Date.now()) => new Date(t).toISOString().slice(0, 10);
 
 // Probes still in flight when the server stopped get their outcome from
 // signature status; ones never seen stay out of calibration but count as spent.
@@ -56,6 +60,10 @@ export async function loadProbes(rows: ReceiptRow[], save: (signature: string, l
     value.forEach((s, j) => s && found.set(batch[j] as string, s));
   }
   for (const r of rows) {
+    if (r.kind === "demo" && utcDay(r.createdAt.getTime()) === utcDay()) {
+      demoDay.day = utcDay();
+      demoDay.count++;
+    }
     const status = found.get(r.signature);
     if (status) {
       r.landedSlot = status.slot;
@@ -69,7 +77,7 @@ export async function loadProbes(rows: ReceiptRow[], save: (signature: string, l
       bucket: r.bucket ?? 0,
       percentile: r.percentile ?? 0,
       predicted: r.predicted ?? 0,
-      calibrate: r.predicted !== null,
+      calibrate: r.kind === "probe" && r.predicted !== null,
       sentSlot: r.sentSlot,
       landedSlot: r.landedSlot,
       failure: r.failure as FailureClass | null,
@@ -87,10 +95,20 @@ export function probeSettled(r: Receipt): void {
 }
 
 // Settled probes that count toward calibration.
-export function probeOutcomes(): (ProbeOutcome & { predicted: number })[] {
+export function probeOutcomes(): (ProbeOutcome & { predicted: number; sentSlot: number })[] {
   return [...records.values()]
     .filter((r) => r.settled && r.calibrate && r.failure !== "send_rejected")
-    .map((r) => ({ bucket: r.bucket, predicted: r.predicted, slotsToLand: r.landedSlot === null ? null : r.landedSlot - r.sentSlot }));
+    .map((r) => ({ bucket: r.bucket, predicted: r.predicted, sentSlot: r.sentSlot, slotsToLand: r.landedSlot === null ? null : r.landedSlot - r.sentSlot }));
+}
+
+// The public side of probing: counts and outcomes, never money.
+export function probeSummary() {
+  const probes = [...records.values()].filter((r) => r.calibrate);
+  return {
+    trips: probes.length,
+    landed: probes.filter((r) => r.landedSlot !== null && r.failure === null).length,
+    running: !stopped && probeKeypair() !== null,
+  };
 }
 
 // Unsettled probes count in full: they may still land.
@@ -154,13 +172,13 @@ export function probeKeypair(): Keypair | null {
   return config.probeSecret ? Keypair.fromSecretKey(bs58.decode(config.probeSecret)) : null;
 }
 
-export function buildTx(payer: Keypair, tipAccount: string, tip: number, blockhash: string, memo: string): VersionedTransaction {
+export function buildTx(payer: Keypair, tipAccount: string, tip: number, blockhash: string, memo: string, microLamports = PROBE_COMPUTE_UNIT_PRICE): VersionedTransaction {
   const message = new TransactionMessage({
     payerKey: payer.publicKey,
     recentBlockhash: blockhash,
     instructions: [
       ComputeBudgetProgram.setComputeUnitLimit({ units: PROBE_COMPUTE_UNIT_LIMIT }),
-      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PROBE_COMPUTE_UNIT_PRICE }),
+      ComputeBudgetProgram.setComputeUnitPrice({ microLamports }),
       new TransactionInstruction({ programId: new PublicKey(MEMO_PROGRAM), keys: [], data: Buffer.from(memo) }),
       SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: new PublicKey(tipAccount), lamports: tip }),
     ],
@@ -182,7 +200,7 @@ async function sendProbe(payer: Keypair, slot: number, target: { tip: number; pc
   records.set(signature, { signature, tip, sentSlot: slot, landedSlot: null, failure: null, settled: false, calibrate: true, ...fields });
   const r = track(signature, "probe", slot, recent.lastValidBlockHeight, tip);
   onSent(r, fields);
-  bus.emit("probe", { signature, tip, ...fields, budget: budgetState() });
+  bus.emit("probe", { signature, tip, ...fields });
   try {
     await beamSend(Buffer.from(tx.serialize()).toString("base64"));
   } catch (e) {
@@ -195,7 +213,56 @@ function stop(reason: string): void {
   stopped = true;
   stopReason = reason;
   console.log(`[probe] stopped: ${reason}`);
-  bus.emit("probe", { budget: budgetState() });
+}
+
+export interface DemoFare {
+  id: FareId;
+  tipLamports: number;
+  priorityFeeMicroLamports: number;
+  probability: number;
+  deadlineSlots: number;
+}
+
+export interface DemoRefusal {
+  reason: "daily" | "budget";
+  retryAfterSec: number | null;
+  error: string;
+}
+
+const demoFee = (microLamports: number) => BASE_FEE_PER_SIGNATURE + Math.ceil((microLamports * PROBE_COMPUTE_UNIT_LIMIT) / 1_000_000);
+
+export function demoRefusal(f: DemoFare, now = Date.now()): DemoRefusal | null {
+  if (demoDay.day !== utcDay(now)) Object.assign(demoDay, { day: utcDay(now), count: 0 });
+  if (demoDay.count >= config.demoDailyMax) {
+    const midnight = Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), new Date(now).getUTCDate() + 1);
+    return { reason: "daily", retryAfterSec: Math.ceil((midnight - now) / 1000), error: "today's free test sends are used up" };
+  }
+  if (budgetState().leftLamports < f.tipLamports + demoFee(f.priorityFeeMicroLamports)) {
+    console.log(`[demo] refused: budget left ${budgetState().leftLamports} lamports`);
+    return { reason: "budget", retryAfterSec: null, error: "free test sends are paused" };
+  }
+  return null;
+}
+
+// One server-paid send at a fare, tracked like any other send.
+export async function sendDemo(f: DemoFare, slot: number, onSent: (r: Receipt, f: Partial<ProbeFields>) => void): Promise<string> {
+  const payer = probeKeypair() as Keypair;
+  const recent = confirmedBlockhash() ?? (await rpc<{ value: { blockhash: string; lastValidBlockHeight: number } }>("getLatestBlockhash", [{ commitment: "confirmed" }])).value;
+  const tips = await beamTipAddresses();
+  const tx = buildTx(payer, tips[Math.floor(Math.random() * tips.length)] as string, f.tipLamports, recent.blockhash, DEMO_MEMO, f.priorityFeeMicroLamports);
+  const signature = bs58.encode(tx.signatures[0] as Uint8Array);
+  const fee = demoFee(f.priorityFeeMicroLamports);
+  records.set(signature, { signature, tip: f.tipLamports, fee, bucket: 0, percentile: 0, predicted: 0, sentSlot: slot, landedSlot: null, failure: null, settled: false, calibrate: false });
+  demoDay.count++;
+  const r = track(signature, "demo", slot, recent.lastValidBlockHeight, f.tipLamports, { fare: f.id, quotedProbability: f.probability, deadlineSlots: f.deadlineSlots });
+  onSent(r, { fee });
+  try {
+    await beamSend(Buffer.from(tx.serialize()).toString("base64"));
+  } catch (e) {
+    rejected(r, (e as Error).message);
+  }
+  console.log(`[demo] ${f.id} tip ${f.tipLamports}, ${demoDay.count} today, budget left ${budgetState().leftLamports}`);
+  return signature;
 }
 
 const WARMUP_MS = 45_000;
@@ -227,7 +294,6 @@ export async function startProbes(slot: () => number, onSent: (r: Receipt, f: Pr
     const left = budgetState().leftLamports;
     for (const b of plan.buckets) console.log(`[probe] plan p${b.lo}-${b.hi}: ${b.status}, have ${b.have}, planned ${b.planned}${b.tip ? ` at ${b.tip} lamports` : ""}`);
     console.log(`[probe] plan total: ${plan.probes} probes, ${plan.costLamports} lamports (${plan.costLamports / LAMPORTS_PER_SOL} SOL); budget left ${left} lamports`);
-    bus.emit("probe", { plan, budget: budgetState() });
     if (plan.probes === 0) return stop(`every reachable bucket has ${MIN_BUCKET_PROBES} probes`);
     if (plan.costLamports > left) return stop(`plan cost ${plan.costLamports} exceeds budget left ${left}`);
     tick();

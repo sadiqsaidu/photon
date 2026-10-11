@@ -50,6 +50,9 @@ export const receipts = pgTable("receipts", {
   error: text("error"),
   stages: jsonb("stages").notNull(),
   beam: jsonb("beam"),
+  fare: text("fare"),
+  quotedProbability: doublePrecision("quoted_probability"),
+  deadlineSlots: integer("deadline_slots"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -148,7 +151,7 @@ export interface ProbeFields {
   predicted: number;
 }
 
-export async function saveReceipt(r: Receipt, probe?: ProbeFields): Promise<void> {
+export async function saveReceipt(r: Receipt, probe?: Partial<ProbeFields>): Promise<void> {
   const row = {
     signature: r.signature,
     kind: r.kind,
@@ -159,6 +162,9 @@ export async function saveReceipt(r: Receipt, probe?: ProbeFields): Promise<void
     error: r.error,
     stages: r.stages,
     beam: r.beam,
+    fare: r.fare,
+    quotedProbability: r.quotedProbability,
+    deadlineSlots: r.deadlineSlots,
     ...(probe ?? {}),
   };
   await db.insert(receipts).values(row).onConflictDoUpdate({
@@ -176,10 +182,19 @@ export async function markLanded(signature: string, landedSlot: number, failed: 
   await db.update(receipts).set({ landedSlot, failure: failed ? "failed_onchain" : null }).where(eq(receipts.signature, signature));
 }
 
-export function latestReceipts(n: number): Promise<ReceiptRow[]> {
-  return db.select().from(receipts).orderBy(desc(receipts.createdAt)).limit(n);
+export function latestReceipts(n: number, kind?: Receipt["kind"]): Promise<ReceiptRow[]> {
+  const q = db.select().from(receipts);
+  return (kind ? q.where(eq(receipts.kind, kind)) : q).orderBy(desc(receipts.createdAt)).limit(n);
 }
 
+// Probes and server-paid demos share the probe wallet and its budget.
 export function probeRows(): Promise<ReceiptRow[]> {
-  return db.select().from(receipts).where(eq(receipts.kind, "probe")).orderBy(desc(receipts.createdAt));
+  return db.select().from(receipts).where(inArray(receipts.kind, ["probe", "demo"])).orderBy(desc(receipts.createdAt));
+}
+
+export async function beamDay(): Promise<{ sends: number; landed: number }> {
+  const { rows } = await db.execute<{ sends: string; landed: string }>(sql`
+    select count(*) as sends, count(*) filter (where landed_slot is not null and failure is null) as landed
+    from receipts where created_at > now() - interval '24 hours'`);
+  return { sends: Number(rows[0]?.sends ?? 0), landed: Number(rows[0]?.landed ?? 0) };
 }

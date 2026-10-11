@@ -7,5 +7,5 @@ export default defineConfig({
   schema: "./src/db.ts",
   out: "./drizzle",
   dialect: "postgresql",
-  dbCredentials: { url: process.env.DATABASE_URL ?? "postgres://photon:photon@localhost:5432/photon" },
+  dbCredentials: { url: process.env.DATABASE_URL ?? "postgres://tipwise:tipwise@localhost:5432/tipwise" },
 });

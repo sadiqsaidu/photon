@@ -27,7 +27,7 @@ export const config = {
   apiUrl: `https://${host("api")}`,
   grpcUrl: `https://${host("grpc")}`,
   wsUrl: `wss://${host("ws")}`,
-  databaseUrl: env.DATABASE_URL ?? "postgres://photon:photon@localhost:5432/photon",
+  databaseUrl: env.DATABASE_URL ?? "postgres://tipwise:tipwise@localhost:5432/tipwise",
   port: num("PORT", 8080),
   probeSecret: env.PROBE_SECRET ?? "",
   probeIntervalSec: num("PROBE_INTERVAL_SEC", 60),
@@ -37,6 +37,9 @@ export const config = {
   tipCeilingLamports: num("TIP_CEILING_LAMPORTS", 1_000_000),
   auditMaxBlocks: num("AUDIT_MAX_BLOCKS", 40),
   webhookPublicUrl: env.WEBHOOK_PUBLIC_URL ?? "",
+  adminToken: env.ADMIN_TOKEN ?? "",
+  demoDailyMax: num("DEMO_DAILY_MAX", 40),
+  allowedOrigins: (env.ALLOWED_ORIGINS ?? "").split(",").map((o) => o.trim().replace(/\/$/, "")).filter(Boolean),
 };
 
 export function requireApiKey(): string {
@@ -47,7 +50,13 @@ export function requireApiKey(): string {
 export const LAMPORTS_PER_SOL = 1_000_000_000;
 export const SOL_MINT = "So11111111111111111111111111111111111111112";
 export const MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
-export const PROBE_MEMO = "photon-probe";
+export const PROBE_MEMO = "tipwise-probe";
+export const DEMO_MEMO = "tipwise-demo";
+
+// Solami resources created before the rename; deleted at startup.
+export const LEGACY_LABELS = { mirage: "photon-slots", webhook: "photon-audit" };
+export const MIRAGE_LABEL = "tipwise-slots";
+export const WEBHOOK_LABEL = "tipwise-audit";
 
 export const JITO_TIP_ACCOUNTS = [
   "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
@@ -94,6 +103,37 @@ export const MIN_BUCKET_PROBES = 10;
 export const PRIORITY_FEE_TTL_MS = 10_000;
 export const PROBE_COMPUTE_UNIT_PRICE = 1_000;
 export const PROBE_COMPUTE_UNIT_LIMIT = 20_000;
+
+export const SLOT_MS = 400;
+export type FareId = "saver" | "standard" | "express";
+export const FARES: { id: FareId; label: string; deadlineSlots: number; confidence: number }[] = [
+  { id: "saver", label: "Saver", deadlineSlots: 10, confidence: 0.8 },
+  { id: "standard", label: "Standard", deadlineSlots: 6, confidence: 0.9 },
+  { id: "express", label: "Express", deadlineSlots: 3, confidence: 0.95 },
+];
+// Fares price the live window without the per-slot trend: per-slot p50 and p90
+// swing by 10x between slots, so any projection made the board jump by 2 to 4x.
+export const FARE_FORECAST_SLOTS = 0;
+export const FARES_EVERY_MS = 2_000;
+export const PRODUCTS_EVERY_MS = 5_000;
+export const SOL_PRICE_EVERY_MS = 60_000;
+
+export const MOOD_RECENT_SLOTS = 50;
+export const MOOD_QUIET_BELOW = 0.8;
+export const MOOD_RUSH_ABOVE = 1.5;
+
+export const PAYER_WINDOW_MS = 10 * 60_000;
+export const EXAMPLE_WALLETS = 3;
+
+export const DEMO_COOLDOWN_MS = 20_000;
+export const DEMO_IP_COOLDOWN_MS = 3 * 60_000;
+export const AUDIT_PER_MINUTE = 6;
+export const WATCH_PER_MINUTE = 3;
+export const AUDIT_REUSE_MS = 60_000;
+
+// Wallet checkup stamps: share of tips above the going rate, share too low.
+export const STAMP_OVERPAID_SHARE = 0.3;
+export const STAMP_TOO_LOW_SHARE = 0.25;
 
 export const LEADER_COUNT = 20;
 export const LEADER_REFRESH_SLOTS = 40;

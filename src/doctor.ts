@@ -46,7 +46,7 @@ function grpcFirstSlot(): Promise<string> {
         });
         stream.on("error", (e: Error) => done(() => reject(e)));
         stream.write({
-          slots: { photon: { filterByCommitment: false } },
+          slots: { tipwise: { filterByCommitment: false } },
           accounts: {},
           transactions: {},
           transactionsStatus: {},

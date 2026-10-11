@@ -1,4 +1,4 @@
-# Photon
+# Tipwise
 
 Solana tip oracle built on Solami. The task spec lives in the session; the
 code style rules are: TypeScript strict ESM, functions and plain objects, almost

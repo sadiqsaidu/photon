@@ -2,9 +2,12 @@ import {
   BEAM_MIN_TIP,
   BUCKETS,
   config,
+  FARE_FORECAST_SLOTS,
+  FARES,
   LAMPORTS_PER_SOL,
   MIN_BUCKET_PROBES,
   PRIORITY_FEE_TTL_MS,
+  SLOT_MS,
 } from "./config.js";
 import { rpc } from "./solami.js";
 import { percentile, rankOf } from "./stats.js";
@@ -77,13 +80,14 @@ export function pickBucket(p: number[], confidence: number, reachable = ALL_REAC
   return { index: open.at(-1)?.i ?? p.length - 1, meetsConfidence: false };
 }
 
-function bucketPrice(index: number, deadline: number): number {
+function bucketPrice(index: number, horizon: number): number {
   const b = BUCKETS[index] as (typeof BUCKETS)[number];
   const pct = b.hi >= 100 ? TOP_PERCENTILE : b.hi;
-  return Math.min(config.tipCeilingLamports, Math.max(BEAM_MIN_TIP, forecastAt(pct, deadline)));
+  return Math.min(config.tipCeilingLamports, Math.max(BEAM_MIN_TIP, forecastAt(pct, horizon)));
 }
 
 let feeCache: { at: number; value: number } | null = null;
+export const priorityFeeAge = () => (feeCache ? Date.now() - feeCache.at : null);
 export async function priorityFee(): Promise<number> {
   if (feeCache && Date.now() - feeCache.at < PRIORITY_FEE_TTL_MS) return feeCache.value;
   const fees = await rpc<{ prioritizationFee: number }[]>("getRecentPrioritizationFees");
@@ -121,12 +125,85 @@ export function calibration(probes: { bucket: number; predicted: number; slotsTo
   };
 }
 
-export async function quote(deadline: number, confidence: number, outcomes: ProbeOutcome[]) {
+// Out of sample: each probe is scored against what the model would have said
+// at `deadline` from the probes sent before it (priors until calibrated).
+export function trackRecord(probes: (ProbeOutcome & { sentSlot: number })[], deadline: number, reachable = ALL_REACHABLE) {
+  const ordered = [...probes].sort((a, b) => a.sentSlot - b.sentSlot);
+  const scored = ordered.map((o, i) => ({
+    bucket: o.bucket,
+    promised: probabilities(ordered.slice(0, i), deadline, reachable).p[o.bucket] as number,
+    onTime: o.slotsToLand !== null && o.slotsToLand <= deadline,
+  }));
+  const rows = BUCKETS.map((b, i) => {
+    const mine = scored.filter((s) => s.bucket === i);
+    const n = mine.length;
+    return {
+      lo: b.lo,
+      hi: b.hi,
+      n,
+      promised: n ? Math.round((mine.reduce((a, s) => a + s.promised, 0) / n) * 1000) / 1000 : null,
+      delivered: n ? Math.round((mine.filter((s) => s.onTime).length / n) * 1000) / 1000 : null,
+      reachable: reachable[i] as boolean,
+    };
+  });
+  const used = rows.filter((r) => r.n > 0);
+  const total = used.reduce((a, r) => a + r.n, 0);
+  const gap = total ? used.reduce((a, r) => a + r.n * Math.abs((r.promised as number) - (r.delivered as number)), 0) / total : null;
+  return { deadlineSlots: deadline, trips: total, averageGapPoints: gap === null ? null : Math.round(gap * 1000) / 10, rows };
+}
+
+// Calibration progress in test trips: probes counted toward full buckets.
+export function progress(outcomes: ProbeOutcome[], reachable = ALL_REACHABLE): { done: number; needed: number } {
+  let done = 0, needed = 0;
+  BUCKETS.forEach((_, i) => {
+    if (!reachable[i]) return;
+    needed += MIN_BUCKET_PROBES;
+    done += Math.min(MIN_BUCKET_PROBES, outcomes.filter((o) => o.bucket === i).length);
+  });
+  return { done, needed };
+}
+
+// A slower fare never costs more than a faster one.
+export function capByFaster<T extends { tipLamports: number }>(slowestFirst: T[]): T[] {
+  const out = slowestFirst.map((f) => ({ ...f }));
+  for (let i = out.length - 2; i >= 0; i--) {
+    const faster = out[i + 1] as T;
+    if ((out[i] as T).tipLamports > faster.tipLamports) (out[i] as T).tipLamports = faster.tipLamports;
+  }
+  return out;
+}
+
+export async function fares(outcomes: ProbeOutcome[], solPriceUsd: number | null) {
+  const quotes = await Promise.all(FARES.map((f) => quote(f.deadlineSlots, f.confidence, outcomes, FARE_FORECAST_SLOTS)));
+  const priced = capByFaster(FARES.map((f, i) => ({ fare: f, q: quotes[i] as Awaited<ReturnType<typeof quote>>, tipLamports: (quotes[i] as { tipLamports: number }).tipLamports })));
+  const dist = distribution();
+  return {
+    fares: priced.map(({ fare, q, tipLamports }) => ({
+      id: fare.id,
+      label: fare.label,
+      deadlineSlots: fare.deadlineSlots,
+      deadlineMs: fare.deadlineSlots * SLOT_MS,
+      confidence: fare.confidence,
+      tipLamports,
+      tipSol: tipLamports / LAMPORTS_PER_SOL,
+      tipUsd: solPriceUsd === null ? null : Math.round((tipLamports / LAMPORTS_PER_SOL) * solPriceUsd * 10_000) / 10_000,
+      priorityFeeMicroLamports: q.priorityFeeMicroLamports,
+      probability: q.probability,
+      meetsConfidence: q.meetsConfidence,
+    })),
+    calibrated: quotes[0]?.calibrated ?? false,
+    progress: progress(outcomes, reachableBuckets(dist.sorted)),
+    samples: dist.sorted.length,
+    solPriceUsd,
+  };
+}
+
+export async function quote(deadline: number, confidence: number, outcomes: ProbeOutcome[], horizon = deadline) {
   const dist = distribution();
   const reachable = reachableBuckets(dist.sorted);
   const { p, calibrated } = probabilities(outcomes, deadline, reachable);
   const { index, meetsConfidence } = pickBucket(p, confidence, reachable);
-  const tipLamports = bucketPrice(index, deadline);
+  const tipLamports = bucketPrice(index, horizon);
   return {
     deadlineSlots: deadline,
     confidence,

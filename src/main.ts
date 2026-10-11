@@ -1,5 +1,5 @@
 import { startBlur } from "./blur.js";
-import { bus, LAG_INTERVAL_MS, requireApiKey } from "./config.js";
+import { bus, FARES_EVERY_MS, LAG_INTERVAL_MS, PRODUCTS_EVERY_MS, requireApiKey, SOL_PRICE_EVERY_MS, TIP_WINDOW_SLOTS } from "./config.js";
 import { latestReceipts, markLanded, migrateDb, probeRows, prune, saveReceipt, saveSlots, storedSlots, type ProbeFields } from "./db.js";
 import { demo } from "./demo.js";
 import { doctor } from "./doctor.js";
@@ -8,11 +8,12 @@ import { leaderOf, onFinalized, refreshLeaders } from "./leaders.js";
 import * as lifecycle from "./lifecycle.js";
 import { raceSlot, raceStats, startMirage } from "./mirage.js";
 import { budgetState, loadProbes, probeOutcomes, probeSettled, startProbes } from "./probe.js";
-import { quote } from "./quote.js";
+import { products } from "./products.js";
+import { fares, quote } from "./quote.js";
 import { asReceipt, routes } from "./routes.js";
 import { startServer } from "./server.js";
-import { beamTipAddresses, leaderNow } from "./solami.js";
-import { addHeat, addTip, confirmedRow, onConfirmed, recentHeat, refreshLag, seedWindow, tipState, useLeaders, type SlotStats } from "./tips.js";
+import { beamTipAddresses, leaderNow, refreshSolPrice, solPrice } from "./solami.js";
+import { addHeat, addTip, confirmedRow, mood, onConfirmed, recentHeat, refreshLag, seedWindow, tipState, useLeaders, type SlotStats } from "./tips.js";
 import { resumeWebhook, webhookHealth } from "./watch.js";
 
 const RECENT_RECEIPTS = 20;
@@ -35,7 +36,7 @@ async function optional<T>(feature: string, fn: () => Promise<T>, fallback: T): 
 async function serve(): Promise<void> {
   requireApiKey();
   await migrateDb();
-  seedWindow((await storedSlots(150)).reverse());
+  seedWindow((await storedSlots(TIP_WINDOW_SLOTS)).reverse());
   const beamTips = await optional("beam", beamTipAddresses, []);
   await loadProbes(await probeRows(), markLanded);
   const startedAt = Date.now();
@@ -43,6 +44,7 @@ async function serve(): Promise<void> {
   let chainTip = 0;
   let behind = 0;
   let maxBehind = 0;
+  let leaderAt = 0;
   const finalizedRows: SlotStats[] = [];
   const probeFields = new Map<string, ProbeFields>();
   const recent: lifecycle.Receipt[] = (await latestReceipts(RECENT_RECEIPTS)).map(asReceipt);
@@ -88,7 +90,7 @@ async function serve(): Promise<void> {
     recent.length = Math.min(recent.length, RECENT_RECEIPTS);
   });
   lifecycle.onReceiptSettled((r) => {
-    if (r.kind === "probe") probeSettled(r);
+    if (r.kind === "probe" || r.kind === "demo") probeSettled(r);
     saveReceipt(r, probeFields.get(r.signature)).catch((e: Error) => console.error(`[db] receipt ${r.signature}: ${e.message}`));
     const link = `https://solscan.io/tx/${r.signature}`;
     const landed = r.landedSlot === null ? "not landed" : `landed slot ${r.landedSlot} (+${r.landedSlot - r.sentSlot})`;
@@ -123,6 +125,7 @@ async function serve(): Promise<void> {
     leaderNow().then(
       (l) => {
         chainTip = l.slot;
+        leaderAt = Date.now();
         behind = Math.max(0, l.slot - processed);
         if (processed && behind > maxBehind) maxBehind = behind;
       },
@@ -132,6 +135,41 @@ async function serve(): Promise<void> {
   setInterval(() => {
     if (tipState().samples) quote(2, 0.9, probeOutcomes()).then((q) => bus.emit("quote", q), () => undefined);
   }, 5_000);
+
+  const refreshPrice = () => refreshSolPrice().catch((e: Error) => console.warn(`[data] SOL price: ${e.message}`));
+  await refreshPrice();
+  setInterval(refreshPrice, SOL_PRICE_EVERY_MS);
+
+  let fareCache: Awaited<ReturnType<typeof fares>> | null = null;
+  let fareKey = "";
+  const refreshFares = async () => {
+    fareCache = await fares(probeOutcomes(), solPrice().usd);
+    return fareCache;
+  };
+  setInterval(() => {
+    if (!tipState().samples) return;
+    refreshFares().then(
+      (f) => {
+        const event = { ...f, mood: mood() };
+        const key = JSON.stringify(event);
+        if (key === fareKey) return;
+        fareKey = key;
+        bus.emit("fares", { ...event, updatedAt: Date.now() });
+      },
+      (e: Error) => console.warn(`[fares] ${e.message}`),
+    );
+  }, FARES_EVERY_MS);
+
+  const productContext = {
+    streams,
+    degraded: degradedNow,
+    beamTips,
+    behind: () => behind,
+    leaderAgeMs: () => (leaderAt ? Date.now() - leaderAt : null),
+  };
+  setInterval(() => {
+    products(productContext).then((p) => bus.emit("products", p), (e: Error) => console.warn(`[products] ${e.message}`));
+  }, PRODUCTS_EVERY_MS);
   setInterval(() => {
     const t = tipState();
     const race = raceStats();
@@ -155,9 +193,12 @@ async function serve(): Promise<void> {
       maxBehind: () => maxBehind,
       streams,
       degraded: degradedNow,
+      fares: async () => fareCache ?? refreshFares(),
+      products: () => products(productContext),
+      onDemoSent: (r, fields) => saveReceipt(r, fields).catch((e: Error) => console.error(`[db] receipt ${r.signature}: ${e.message}`)),
     }),
   );
-  console.log(`[photon] region streams up; ${beamTips.length} Beam tip addresses; probes ${probeWallet ? "on" : "off (PROBE_SECRET not set)"}`);
+  console.log(`[tipwise] region streams up; ${beamTips.length} Beam tip addresses; probes ${probeWallet ? "on" : "off (PROBE_SECRET not set)"}`);
 }
 
 // Hosts stop instances with SIGTERM; exit cleanly so exit hooks run.

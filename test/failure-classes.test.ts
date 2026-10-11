@@ -96,7 +96,7 @@ describe("beamTipOf", () => {
     const { Keypair, PublicKey } = await import("@solana/web3.js");
     const { buildTx } = await import("../src/probe.js");
     const tipAccount = "15qWd4huAkoxvhDsHMfpUn27TW1YBYMMJJ2jkAkbeam";
-    const tx = buildTx(Keypair.generate(), tipAccount, 123_456, new PublicKey(new Uint8Array(32)).toBase58(), "photon-probe");
+    const tx = buildTx(Keypair.generate(), tipAccount, 123_456, new PublicKey(new Uint8Array(32)).toBase58(), "tipwise-probe");
     expect(lifecycle.beamTipOf(tx, new Set([tipAccount]))).toBe(123_456);
     expect(lifecycle.beamTipOf(tx, new Set())).toBe(0);
   });
