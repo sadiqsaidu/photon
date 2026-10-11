@@ -1,0 +1,77 @@
+.picker {
+  border: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.tile {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  padding: 16px 16px 14px;
+  border-radius: 12px;
+  background: var(--board);
+  color: var(--board-label);
+  cursor: pointer;
+  box-shadow: 0 0 0 1px #000, 0 10px 24px -16px rgba(12, 14, 18, 0.6);
+  transition: box-shadow 150ms;
+}
+
+.tile:hover {
+  box-shadow: 0 0 0 1px #000, 0 0 0 3px rgba(255, 178, 26, 0.35);
+}
+
+.on {
+  box-shadow: 0 0 0 1px #000, 0 0 0 3px var(--amber);
+}
+
+.on:hover {
+  box-shadow: 0 0 0 1px #000, 0 0 0 3px var(--amber);
+}
+
+.tile:has(.radio:focus-visible) {
+  outline: 2px solid var(--ink);
+  outline-offset: 4px;
+}
+
+.radio {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.nameFlaps {
+  font-size: 17px;
+}
+
+.priceFlaps {
+  font-size: 34px;
+}
+
+.promise {
+  font-size: 13px;
+  line-height: 1.4;
+  min-height: 36px;
+}
+
+.on .promise {
+  color: #c9cdd3;
+}
+
+@media (max-width: 760px) {
+  .picker {
+    grid-template-columns: 1fr;
+  }
+  .tile {
+    grid-template-columns: 1fr auto;
+    align-items: center;
+  }
+  .promise {
+    grid-column: 1 / -1;
+    min-height: 0;
+  }
+  .priceFlaps {
+    font-size: 27px;
+  }
+}

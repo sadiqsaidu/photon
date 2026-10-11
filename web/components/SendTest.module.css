@@ -1,0 +1,89 @@
+.page {
+  padding: 64px 0 24px;
+}
+
+.intro {
+  display: grid;
+  gap: 20px;
+  max-width: 760px;
+}
+
+.step {
+  margin-top: 48px;
+  display: grid;
+  gap: 16px;
+}
+
+.choices {
+  margin-top: 28px;
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: var(--gutter);
+  align-items: start;
+}
+
+.primary {
+  grid-column: 1 / span 5;
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+
+.primary :global(.btn) {
+  min-height: 52px;
+  padding: 0 26px;
+  font-size: 17px;
+}
+
+.secondary {
+  grid-column: 7 / span 6;
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+
+.limit {
+  font-weight: 500;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: #f3e3bd;
+}
+
+.result {
+  margin-top: 56px;
+  display: grid;
+  gap: 28px;
+}
+
+.settled {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: var(--gutter);
+  align-items: start;
+}
+
+.ticket {
+  grid-column: 1 / span 5;
+}
+
+.words {
+  grid-column: 7 / span 6;
+  padding-top: 32px;
+}
+
+@media (max-width: 900px) {
+  .page {
+    padding-top: 32px;
+  }
+  .choices,
+  .settled {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .primary,
+  .secondary,
+  .ticket,
+  .words {
+    grid-column: 1 / -1;
+  }
+}
