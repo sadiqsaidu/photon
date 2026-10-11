@@ -7,7 +7,7 @@ const DIGITS = "0123456789";
 export function Odometer({ value, label }: { value: number; label: string }) {
   const text = value ? value.toLocaleString("en-US") : "000,000,000";
   return (
-    <span className={s.odo} role="text" aria-label={label}>
+    <span className={s.odo} role="img" aria-label={label}>
       {[...text].map((ch, i) =>
         ch === "," ? (
           <span key={`c${i}`} className={s.comma} aria-hidden="true">

@@ -22,11 +22,12 @@ export function Journey({ receipt }: { receipt: Receipt | null }) {
   const live = receipt && !failed && reached < STATIONS.length - 1;
   return (
     <div className={s.journey}>
-      <ol className={s.line} aria-label="Journey of the transaction">
+      <div className={s.line}>
         <span className={s.track} aria-hidden="true">
           <span className={s.done} style={{ ["--p" as string]: progress }} />
         </span>
         <span className={`${s.marker} ${live ? s.moving : ""} ${failed ? s.stopped : ""}`} style={{ ["--p" as string]: progress, left: `calc(12.5% + ${75 * progress}%)` }} aria-hidden="true" />
+        <ol className={s.stations} aria-label="Journey of the transaction">
         {STATIONS.map((st, i) => {
           const at = stages[st.stage];
           const missed = failed && i === reached + 1;
@@ -50,7 +51,8 @@ export function Journey({ receipt }: { receipt: Receipt | null }) {
             </li>
           );
         })}
-      </ol>
+        </ol>
+      </div>
     </div>
   );
 }

@@ -30,7 +30,7 @@ export function WalletMenu() {
   const address = publicKey?.toBase58();
   return (
     <div className={s.root} ref={root}>
-      <button type="button" className={`btn ${s.trigger}`} aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((o) => !o)}>
+      <button type="button" className={`btn ${s.trigger}`} aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         {address ? (
           <>
             {wallet?.adapter.icon && <img src={wallet.adapter.icon} alt="" width={16} height={16} />}
@@ -43,18 +43,17 @@ export function WalletMenu() {
         )}
       </button>
       {open && (
-        <div className={s.menu} role="menu">
+        <div className={s.menu}>
           {address ? (
             <>
               <p className={s.note}>Connected with {wallet?.adapter.name}</p>
-              <Link role="menuitem" className={s.item} href={`/check/${address}`} onClick={() => setOpen(false)}>
+              <Link className={s.item} href={`/check/${address}`} onClick={() => setOpen(false)}>
                 Check my wallet
               </Link>
-              <Link role="menuitem" className={s.item} href="/send" onClick={() => setOpen(false)}>
+              <Link className={s.item} href="/send" onClick={() => setOpen(false)}>
                 Send a test from my wallet
               </Link>
               <button
-                role="menuitem"
                 type="button"
                 className={s.item}
                 onClick={() => {
@@ -71,7 +70,6 @@ export function WalletMenu() {
               {detected.map((w) => (
                 <button
                   key={w.adapter.name}
-                  role="menuitem"
                   type="button"
                   className={s.item}
                   onClick={() => {

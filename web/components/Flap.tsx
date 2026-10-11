@@ -69,7 +69,7 @@ export function Flaps({
   const n = Math.max(length ?? 0, text.length);
   const padded = align === "left" ? text.padEnd(n) : text.padStart(n);
   return (
-    <span className={`${s.flaps} ${className ?? ""}`} role={label ? "text" : undefined} aria-label={label}>
+    <span className={`${s.flaps} ${className ?? ""}`} role={label ? "img" : undefined} aria-label={label}>
       {[...padded].map((ch, i) => (
         <FlapChar key={i} ch={ch.toUpperCase()} delay={offset + i * stagger} instant={instant} />
       ))}

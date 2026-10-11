@@ -46,13 +46,12 @@ function TradeStrip({ txs, price }: { txs: AuditTx[]; price: number | null }) {
   const active = focus === null ? null : trades[focus];
   return (
     <div className={s.stripWrap}>
-      <div className={s.strip} role="list" aria-label={`${trades.length} trades, oldest first`}>
+      <div className={s.strip} aria-label={`${trades.length} trades, oldest first`} role="group">
         {trades.map((t, i) => {
           const v = verdictOf(t);
           return (
             <a
               key={t.signature}
-              role="listitem"
               href={solscan(t.signature)}
               target="_blank"
               rel="noreferrer"

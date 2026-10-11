@@ -18,7 +18,7 @@ export const NAV = [
 
 export function Wordmark() {
   return (
-    <Link href="/" className={s.mark} aria-label="Tipwise, live board">
+    <Link href="/" className={s.mark}>
       <FlapTile />
       <span>Tipwise</span>
     </Link>

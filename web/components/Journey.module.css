@@ -4,10 +4,13 @@
 
 .line {
   position: relative;
+  --inset: 12.5%;
+}
+
+.stations {
   list-style: none;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  --inset: 12.5%;
 }
 
 .track {
@@ -115,9 +118,11 @@
 
 @media (max-width: 640px) {
   .line {
+    --inset: 0px;
+  }
+  .stations {
     grid-template-columns: 1fr;
     gap: 22px;
-    --inset: 0px;
   }
   .track {
     left: 9px;
