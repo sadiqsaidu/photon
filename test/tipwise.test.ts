@@ -127,6 +127,7 @@ describe("explain", () => {
     const late = explain({ ...base, landedSlot: 108, fare: "express", quotedProbability: 0.6, deadlineSlots: 3 });
     expect(late?.title).toBe("Landed in 8 blocks (3.2 s).");
     expect(late?.whatHappened).toContain("past the target");
+    expect(explain({ ...base, landedSlot: 102, fare: "saver", quotedProbability: 0.8, deadlineSlots: 10 })?.whatHappened).toContain("We estimated an 80% chance");
     expect(explain({ ...base, landedSlot: 101 })?.title).toBe("Landed in 1 block (0.4 s).");
   });
 

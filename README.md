@@ -156,18 +156,20 @@ console.log(receipt.explanation?.title, receipt.explanation?.whatToDo);
 
 ## API
 
+The site's [developer documentation](https://tipwise.tech/developers) covers every endpoint with parameters, examples, fields, errors and rate limits.
+
 | Method and path | Returns |
 | --- | --- |
 | `GET /health` | Stream health (connected, bytes, reconnects, backpressure closures, queue depth), slots behind and the maximum, degraded features. In memory, cheap. |
 | `GET /events` | Server-sent events: `slot`, `tips`, `heat`, `lag`, `quote`, `fares` (at most every 2 s, on change), `products` (every 5 s), `probe`, `lifecycle` (with `explanation`), `stream`, `audit`. Heartbeat every 15 s. |
 | `GET /stats` | Snapshot for the first paint: 600 slot window, mood, fares, SOL price, Solami products, calibration, track record, recent receipts. |
-| `GET /fares` | Saver, Standard and Express: `{ id, label, deadlineSlots, deadlineMs, confidence, tipLamports, tipSol, tipUsd, priorityFeeMicroLamports, probability, meetsConfidence }`, plus `calibrated`, `progress`, `samples`, `solPriceUsd`, `mood`, `updatedAt`. |
-| `GET /track-record` | Promise versus reality per price range at the Standard deadline (each test trip scored against the model built from earlier trips), and the latest test trips. |
+| `GET /fares` | Saver, Standard and Express: `{ id, label, deadlineSlots, deadlineMs, confidence, tipLamports, tipSol, tipUsd, priorityFeeMicroLamports, probability, meetsConfidence, bucket, estimate, ceilingLimited }`, plus `calibrated`, `progress`, `samples`, `solPriceUsd`, `forecastHorizonSlots`, `tipCeilingLamports`, `slotMs`, `mood`, `updatedAt`. `estimate` is `{ basis: measured, inherited or prior, samples, landed, newestSlot }`. |
+| `GET /track-record` | Estimate versus outcome per price range at the Standard deadline (each test trip scored against the model built from earlier trips; the fields keep the names `promised` and `delivered`), and the latest test trips. |
 | `GET /audit/examples` | The 3 wallets that tipped most often in the last 10 minutes (live from gRPC). |
 | `GET /blockhash` | `{ blockhash, lastValidBlockHeight }` from the confirmed stream, so a browser needs no RPC key. |
 | `POST /demo/send` | Body `{ "fare" }`. Tipwise sends one tipped transaction from its own wallet. Limits: one every 20 s globally, one per IP every 3 minutes, `DEMO_DAILY_MAX` per day, the probe budget. Over a limit: 429 `{ error, retryAfterSec, reason }`. |
 | `GET /admin/probe` | Probe budget state. Only with `authorization: Bearer <ADMIN_TOKEN>`; otherwise 404. |
-| `GET /quote?deadline=2&confidence=0.9` | Tip, priority fee, probability, `meetsConfidence`, `calibrated`, per-bucket status. |
+| `GET /quote?deadline=2&confidence=0.9` | Tip, priority fee, probability, `meetsConfidence`, `calibrated`, `bucket`, `estimate`, `ceilingLimited`, and every bucket's estimate, trip count, basis and status. Prices `deadline` slots ahead, unlike fares. |
 | `GET /tips/addresses` | Beam tip addresses and Jito tip accounts. |
 | `POST /send` | Body `{ "tx": "<base64 signed transaction>", "fare"? }`. Returns `{ "signature" }`. The transaction must carry at least 100,000 lamports to a Beam tip address. With a fare, the receipt records the promise. |
 | `GET /receipt/:signature` | Stages with slot and ms, landed slot, failure class, Beam landing record, `settled`, `kind`, `fare`, `quotedProbability`, `deadlineSlots`, `sentAt`, and a plain English `explanation`. |

@@ -20,7 +20,8 @@ function landed(r: Receipt, slot: number): Explanation {
     return { verdict: "landed", title, whatHappened: `It went into block ${slot.toLocaleString("en-US")} and is ${stage}.`, whatToDo: "Nothing to fix. The tip was enough to get in." };
   }
   const pct = Math.round(r.quotedProbability * 100);
-  const estimate = `We estimated a ${pct}% chance of landing within ${plural(r.deadlineSlots, "block")}. It took ${blocks}`;
+  const article = /^(8|11|18)/.test(String(pct)) ? "an" : "a";
+  const estimate = `We estimated ${article} ${pct}% chance of landing within ${plural(r.deadlineSlots, "block")}. It took ${blocks}`;
   if (blocks <= r.deadlineSlots) {
     return { verdict: "landed", title, whatHappened: `${estimate}, within the target.`, whatToDo: "Nothing to fix. The tip was enough to get in on time." };
   }
