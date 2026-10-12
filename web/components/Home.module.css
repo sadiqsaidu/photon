@@ -166,6 +166,11 @@
   margin-top: 8px;
 }
 
+.quiet {
+  font-weight: 400;
+  color: var(--ink-2);
+}
+
 .unmetMark {
   background: var(--amber-dim);
   color: var(--board);

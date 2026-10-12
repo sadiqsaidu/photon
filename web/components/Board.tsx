@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { blocks, pct, sol, usd } from "@/lib/format";
 import { useLive } from "@/lib/live";
 import { useNow } from "@/lib/motion";
+import { tipStanding } from "@/lib/fareNotes";
 import type { Fare, Mood } from "@/lib/types";
 import { Flaps } from "./Flap";
 import { Odometer } from "./Odometer";
@@ -39,14 +40,14 @@ function useCycling(active: boolean): string {
   return `$0.${String((n * 7919) % 1000).padStart(3, "0")}`;
 }
 
-// The slower fare a fare shares its price with, if any.
-export function sameAs(fares: Fare[], f: Fare): Fare | null {
-  return fares.find((x) => x.id !== f.id && x.tipLamports === f.tipLamports && fares.indexOf(x) < fares.indexOf(f)) ?? null;
+function tipSub(f: Fare): string {
+  const standing = tipStanding(f);
+  return standing ? `${sol(f.tipLamports)}, ${standing}` : sol(f.tipLamports);
 }
 
 function summary(fares: Fare[]): string {
   return fares
-    .map((f) => `${f.label}: ${usd(f.tipUsd) || sol(f.tipLamports)} tip, estimated ${pct(f.probability)} chance within ${blocks(f.deadlineSlots)}, ${f.meetsConfidence ? "meets" : "below"} the ${pct(f.confidence)} target.`)
+    .map((f) => `${f.label}: ${usd(f.tipUsd) || sol(f.tipLamports)} tip${tipStanding(f) ? `, ${tipStanding(f)}` : ""}, estimated ${pct(f.probability)} chance within ${blocks(f.deadlineSlots)}, ${f.meetsConfidence ? "meets" : "below"} the ${pct(f.confidence)} target.`)
     .join(" ");
 }
 
@@ -111,7 +112,7 @@ export function Board() {
               </div>
               <div className={s.tip}>
                 <Flaps text={f ? tipText(f) : cycling} length={6} align="right" offset={offset + 60} className={s.big} label={f ? `Tip ${usd(f.tipUsd) || sol(f.tipLamports)}` : undefined} />
-                <span className={s.sub}>{f ? `${sol(f.tipLamports)}${sameAs(rows, f) ? `, same tip as ${sameAs(rows, f)!.label}` : ""}` : " "}</span>
+                <span className={s.sub}>{f ? tipSub(f) : " "}</span>
               </div>
               <div className={s.time}>
                 <span className={s.timeValue}>

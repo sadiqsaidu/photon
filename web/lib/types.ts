@@ -19,6 +19,9 @@ export interface Fare {
   bucket?: { lo: number; hi: number };
   estimate?: { basis: "measured" | "inherited" | "prior"; samples: number; landed: number; newestSlot: number | null };
   ceilingLimited?: boolean;
+  tipPercentile?: number;
+  stepApplied?: boolean;
+  probabilityAtCheaperTip?: number | null;
 }
 
 export interface Fares {
@@ -32,6 +35,7 @@ export interface Fares {
   forecastHorizonSlots?: number;
   tipCeilingLamports?: number;
   slotMs?: number;
+  pricing?: "market-percentile";
 }
 
 export interface WindowRow {

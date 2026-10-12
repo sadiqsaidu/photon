@@ -11,7 +11,7 @@ const STEPS = [
   },
   {
     title: "Prices your fare",
-    body: "Pick how fast you need to land. Tipwise picks the cheapest tip that has landed that fast often enough, and tells you the honest chance.",
+    body: "Pick how fast you need to land. Each fare is priced from where landed tips sit right now, and its chance comes from Tipwise's own test trips.",
   },
   {
     title: "Proves it with receipts",

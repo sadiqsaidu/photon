@@ -32,6 +32,9 @@ export interface Fare {
   bucket?: { lo: number; hi: number };
   estimate?: Estimate;
   ceilingLimited?: boolean;
+  tipPercentile?: number;
+  stepApplied?: boolean;
+  probabilityAtCheaperTip?: number | null;
 }
 
 export interface Estimate {

@@ -29,7 +29,7 @@ function landed(r: Receipt, slot: number): Explanation {
     verdict: "landed",
     title,
     whatHappened: `${estimate}, past the target. The estimate left room for this on about ${100 - pct}% of trips.`,
-    whatToDo: "If the deadline matters, compare the estimated chance of each fare before you send. A different label does not add priority when the tip and fee are the same.",
+    whatToDo: "If the deadline matters, compare the estimated chance of each fare before you send. Fare prices follow where landed tips sit today; a higher tip buys position in crowded blocks but does not guarantee an earlier one.",
   };
 }
 

@@ -106,16 +106,22 @@ export const PROBE_COMPUTE_UNIT_LIMIT = 20_000;
 
 export const SLOT_MS = 400;
 export type FareId = "saver" | "standard" | "express";
-// With 10 probes per bucket the smoothed (landed + 1) / (n + 2) tops out at
-// 11/12, so no fare asks for more than 0.9. Probes land in 1 to 2 slots, so
-// only a 1 slot deadline separates the buckets.
-export const FARES: { id: FareId; label: string; deadlineSlots: number; confidence: number }[] = [
-  { id: "saver", label: "Saver", deadlineSlots: 10, confidence: 0.8 },
-  { id: "standard", label: "Standard", deadlineSlots: 4, confidence: 0.9 },
-  { id: "express", label: "Express", deadlineSlots: 1, confidence: 0.9 },
+// Prices follow the live distribution of eligible landed tips: Saver at the
+// median, Standard at p75, Express at p90. The target is what each estimate is
+// judged against; it does not choose the price. With 10 probes per bucket the
+// smoothed (landed + 1) / (n + 2) tops out at 11/12, so no target exceeds 0.9.
+export const FARES: { id: FareId; label: string; deadlineSlots: number; confidence: number; tipPercentile: number }[] = [
+  { id: "saver", label: "Saver", deadlineSlots: 10, confidence: 0.8, tipPercentile: 50 },
+  { id: "standard", label: "Standard", deadlineSlots: 4, confidence: 0.9, tipPercentile: 75 },
+  { id: "express", label: "Express", deadlineSlots: 1, confidence: 0.9, tipPercentile: 90 },
 ];
-// Fares price the live window without the per-slot trend: per-slot p50 and p90
-// swing by 10x between slots, so any projection made the board jump by 2 to 4x.
+// A pricier fare that collides with the one below is raised to this multiple of it.
+export const FARE_MIN_STEP = 1.25;
+// Each fare's tip is the median of its last few computed values, one per fares tick.
+export const FARE_SMOOTH_TICKS = 5;
+// The shown tip holds until the smoothed value moves more than this share away,
+// so a window sitting on a rounding edge does not flip between two prices.
+export const FARE_HOLD_SHARE = 0.05;
 export const FARE_FORECAST_SLOTS = 0;
 export const FARES_EVERY_MS = 2_000;
 export const PRODUCTS_EVERY_MS = 5_000;

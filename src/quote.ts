@@ -3,6 +3,9 @@ import {
   BUCKETS,
   config,
   FARE_FORECAST_SLOTS,
+  FARE_HOLD_SHARE,
+  FARE_MIN_STEP,
+  FARE_SMOOTH_TICKS,
   FARES,
   LAMPORTS_PER_SOL,
   MIN_BUCKET_PROBES,
@@ -191,37 +194,107 @@ export function progress(outcomes: ProbeOutcome[], reachable = ALL_REACHABLE): {
   return { done, needed };
 }
 
-// Every fare is quoted on its own with the same forecast horizon, so prices
-// only differ by bucket. A slower deadline never lowers a bucket's estimate
-// (landing within 10 slots includes landing within 4), so a slower fare that
-// meets its target never needs a pricier bucket than a faster fare that meets
-// its own. A faster fare that misses its target can still be cheaper: it is a
-// best effort at a different target, and its estimate says so.
+const twoSig = (v: number, up = false) => {
+  const unit = 10 ** (Math.floor(Math.log10(v)) - 1);
+  return (up ? Math.ceil(v / unit - 1e-9) : Math.round(v / unit)) * unit;
+};
+const median = (values: number[]) => {
+  const s = [...values].sort((a, b) => a - b);
+  const mid = s.length >> 1;
+  return s.length % 2 ? (s[mid] as number) : ((s[mid - 1] as number) + (s[mid] as number)) / 2;
+};
+
+let fareHistory: number[][] = FARES.map(() => []);
+let fareShown: (number | null)[] = FARES.map(() => null);
+export const resetFareHistory = () => {
+  fareHistory = FARES.map(() => []);
+  fareShown = FARES.map(() => null);
+};
+
+// Market percentile prices: each fare's percentile of eligible landed tips,
+// floored at the Beam minimum and capped at the tip ceiling. A fare that does
+// not sit above the one below is raised to FARE_MIN_STEP times it. Each tip is
+// then the median of its last FARE_SMOOTH_TICKS values, rounded to 2
+// significant figures, and held while that stays within FARE_HOLD_SHARE of the
+// tip already shown. Equal prices only remain where the ceiling forces them.
+export function farePrices(sorted: number[]) {
+  const cap = config.tipCeilingLamports;
+  const raw: { tip: number; stepApplied: boolean; capped: boolean }[] = [];
+  FARES.forEach((f, i) => {
+    const market = Math.max(BEAM_MIN_TIP, percentile(sorted, f.tipPercentile));
+    const below = raw[i - 1]?.tip;
+    const collides = below !== undefined && market <= below;
+    const wanted = collides ? (below as number) * FARE_MIN_STEP : market;
+    raw.push({ tip: Math.min(cap, wanted), stepApplied: collides, capped: wanted > cap });
+  });
+  raw.forEach((r, i) => {
+    const h = fareHistory[i] as number[];
+    h.push(r.tip);
+    if (h.length > FARE_SMOOTH_TICKS) h.shift();
+  });
+  const out: { tipLamports: number; stepApplied: boolean; ceilingLimited: boolean }[] = [];
+  raw.forEach((r, i) => {
+    const smoothed = median(fareHistory[i] as number[]);
+    const shown = fareShown[i];
+    let tip = shown != null && shown <= cap && Math.abs(smoothed - shown) <= shown * FARE_HOLD_SHARE ? shown : Math.min(cap, twoSig(smoothed));
+    let { stepApplied, capped } = r;
+    const below = out[i - 1]?.tipLamports;
+    if (below !== undefined && (tip <= below || (r.stepApplied && tip < below * FARE_MIN_STEP))) {
+      const wanted = twoSig(below * FARE_MIN_STEP, true);
+      tip = Math.max(tip, below, Math.min(cap, wanted));
+      stepApplied = true;
+      capped ||= wanted > cap;
+    }
+    out.push({ tipLamports: tip, stepApplied, ceilingLimited: capped || tip >= cap });
+  });
+  fareShown = out.map((o) => o.tipLamports);
+  return out;
+}
+
+// Fares are priced from where landed tips sit today (farePrices); the chance
+// shown is the landing model's estimate for the bucket the final tip falls in,
+// at the fare's own deadline. /quote works the other way round: it finds the
+// cheapest tip whose estimate meets the target.
 export async function fares(outcomes: ProbeOutcome[], solPriceUsd: number | null) {
-  const quotes = await Promise.all(FARES.map((f) => quote(f.deadlineSlots, f.confidence, outcomes, FARE_FORECAST_SLOTS)));
   const dist = distribution();
+  const sorted = dist.sorted.filter((v) => v >= BEAM_MIN_TIP);
+  const reachable = reachableBuckets(dist.sorted);
+  const prices = farePrices(sorted);
+  const fee = await priorityFee();
+  const indexOf = (tip: number) => (sorted.length ? bucketOf(rankOf(sorted, tip)) : 0);
+  const models = FARES.map((f) => landingModel(outcomes, f.deadlineSlots, reachable));
   return {
     fares: FARES.map((fare, i) => {
-      const q = quotes[i] as Awaited<ReturnType<typeof quote>>;
+      const price = prices[i] as (typeof prices)[number];
+      const model = models[i] as ReturnType<typeof landingModel>;
+      const chosen = model.buckets[indexOf(price.tipLamports)] as (typeof model.buckets)[number];
+      const cheaper = prices[i - 1];
+      const tip = price.tipLamports;
       return {
         id: fare.id,
         label: fare.label,
         deadlineSlots: fare.deadlineSlots,
         deadlineMs: fare.deadlineSlots * SLOT_MS,
         confidence: fare.confidence,
-        tipLamports: q.tipLamports,
-        tipSol: q.tipSol,
-        tipUsd: solPriceUsd === null ? null : Math.round((q.tipLamports / LAMPORTS_PER_SOL) * solPriceUsd * 10_000) / 10_000,
-        priorityFeeMicroLamports: q.priorityFeeMicroLamports,
-        probability: q.probability,
-        meetsConfidence: q.meetsConfidence,
-        bucket: q.bucket,
-        estimate: q.estimate,
-        ceilingLimited: q.ceilingLimited,
+        tipLamports: tip,
+        tipSol: tip / LAMPORTS_PER_SOL,
+        tipUsd: solPriceUsd === null ? null : Math.round((tip / LAMPORTS_PER_SOL) * solPriceUsd * 10_000) / 10_000,
+        priorityFeeMicroLamports: fee,
+        probability: Math.round(chosen.p * 1000) / 1000,
+        meetsConfidence: chosen.p >= fare.confidence,
+        bucket: { lo: chosen.lo, hi: chosen.hi },
+        estimate: { basis: chosen.basis, samples: chosen.n, landed: chosen.landed, newestSlot: chosen.newestSlot },
+        ceilingLimited: price.ceilingLimited,
+        tipPercentile: fare.tipPercentile,
+        stepApplied: price.stepApplied,
+        // The estimate for the next cheaper fare's tip at this fare's deadline:
+        // what paying more is measured to add, like for like.
+        probabilityAtCheaperTip: cheaper ? Math.round((model.buckets[indexOf(cheaper.tipLamports)] as (typeof model.buckets)[number]).p * 1000) / 1000 : null,
       };
     }),
-    calibrated: quotes[0]?.calibrated ?? false,
-    progress: progress(outcomes, reachableBuckets(dist.sorted)),
+    pricing: "market-percentile" as const,
+    calibrated: models[0]?.calibrated ?? false,
+    progress: progress(outcomes, reachable),
     samples: dist.sorted.length,
     solPriceUsd,
     forecastHorizonSlots: FARE_FORECAST_SLOTS,

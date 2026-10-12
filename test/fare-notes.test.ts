@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fareNotes as notesOf, type FareLike } from "../web/lib/fareNotes.js";
+import { fareNotes as notesOf, tipStanding, type FareLike } from "../web/lib/fareNotes.js";
 
 const fareNotes = (...a: Parameters<typeof notesOf>) => notesOf(...a).map((n) => n.text);
 
@@ -15,7 +15,7 @@ const fare = (id: string, deadlineSlots: number, confidence: number, tipLamports
   ...extra,
 });
 
-describe("fare notes", () => {
+describe("fare notes from servers before market pricing", () => {
   it("explains three equal prices without claiming anything about the market", () => {
     const notes = fareNotes([fare("saver", 10, 0.8, 111_814, 0.917), fare("standard", 4, 0.9, 111_814, 0.917), fare("express", 1, 0.9, 111_814, 0.667)]);
     expect(notes[0]).toContain("Same recommended tip for all three fares");
@@ -67,5 +67,80 @@ describe("fare notes", () => {
 
   it("returns nothing while fares are missing", () => {
     expect(fareNotes([])).toEqual([]);
+  });
+});
+
+const market = (id: string, deadlineSlots: number, confidence: number, tipLamports: number, tipPercentile: number, probability: number, probabilityAtCheaperTip: number | null, extra: Partial<FareLike> = {}) =>
+  fare(id, deadlineSlots, confidence, tipLamports, probability, { tipPercentile, probabilityAtCheaperTip, ...extra });
+
+describe("fare notes for market-percentile pricing", () => {
+  const GAIN = "our test trips have not measured a gain yet";
+
+  it("says the pricier fare has no measured gain when its estimate is not above the cheaper tip's at the same deadline", () => {
+    const notes = fareNotes([
+      market("saver", 10, 0.8, 125_000, 50, 0.917, null),
+      market("standard", 4, 0.9, 190_000, 75, 0.917, 0.917),
+      market("express", 1, 0.9, 380_000, 90, 0.75, 0.75),
+    ]);
+    expect(notes).toEqual([
+      "Standard and Express pay in the top quarter of today's tips. That buys position when blocks get crowded; our test trips have not measured a gain yet.",
+      "Express target not met: estimated 75% within 1 block (target 90%). The price follows today's tips; the estimate comes from our test trips.",
+    ]);
+  });
+
+  it("names only the fare without a measured gain", () => {
+    const notes = fareNotes([
+      market("saver", 10, 0.8, 125_000, 50, 0.85, null),
+      market("standard", 4, 0.9, 190_000, 75, 0.917, 0.85),
+      market("express", 1, 0.9, 380_000, 90, 0.917, 0.917),
+    ]);
+    expect(notes).toEqual(["Express pays near the top of today's tips. That buys position when blocks get crowded; our test trips have not measured a gain yet."]);
+  });
+
+  it("stays silent when estimates rise with price, even though tighter deadlines show lower chances", () => {
+    const notes = fareNotes([
+      market("saver", 10, 0.8, 125_000, 50, 0.95, null),
+      market("standard", 4, 0.9, 190_000, 75, 0.917, 0.85),
+      market("express", 1, 0.9, 380_000, 90, 0.917, 0.7),
+    ]);
+    expect(notes).toEqual([]);
+    expect(notes.join(" ")).not.toContain(GAIN);
+  });
+
+  it("does not show the gain line against an older server that sends no like-for-like estimate", () => {
+    const notes = fareNotes([market("saver", 10, 0.8, 1, 50, 0.9, null), market("standard", 4, 0.9, 2, 75, 0.9, null), market("express", 1, 0.9, 3, 90, 0.9, null)]);
+    expect(notes.join(" ")).not.toContain(GAIN);
+  });
+
+  it("explains equal prices only by the tip ceiling", () => {
+    const notes = notesOf(
+      [
+        market("saver", 10, 0.8, 790_000, 50, 0.917, null),
+        market("standard", 4, 0.9, 1_000_000, 75, 0.917, 0.85, { ceilingLimited: true }),
+        market("express", 1, 0.9, 1_000_000, 90, 0.917, 0.917, { ceilingLimited: true }),
+      ],
+      1_000_000,
+    );
+    expect(notes).toEqual([{ kind: "ceiling", text: "Standard and Express are held at the 0.001 SOL tip ceiling, so they share a price." }]);
+    expect(notes.map((n) => n.text).join(" ")).not.toMatch(/same tip|adds no priority|faster/i);
+  });
+
+  it("never claims a higher tip guarantees a faster landing", () => {
+    const notes = fareNotes([
+      market("saver", 10, 0.8, 125_000, 50, 0.5, null),
+      market("standard", 4, 0.9, 190_000, 75, 0.5, 0.5),
+      market("express", 1, 0.9, 380_000, 90, 0.5, 0.5),
+    ]);
+    expect(notes.join(" ")).not.toMatch(/guarantee|faster|lands sooner/i);
+  });
+});
+
+describe("tip standing on the board", () => {
+  it("describes each fare's place among landed tips", () => {
+    expect(tipStanding({ tipPercentile: 50 })).toBe("the typical landed tip");
+    expect(tipStanding({ tipPercentile: 75 })).toBe("top quarter of landed tips");
+    expect(tipStanding({ tipPercentile: 90 })).toBe("top tenth of landed tips");
+    expect(tipStanding({ tipPercentile: 90, ceilingLimited: true })).toBe("held at the tip ceiling");
+    expect(tipStanding({})).toBeNull();
   });
 });

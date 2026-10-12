@@ -41,39 +41,65 @@ export function MoodGauge() {
   );
 }
 
+const NOTE_MARK = { same: "=", ceiling: "=", gain: "i", unmet: "!" } as const;
+
 export function FareNotes() {
   const fares = useLive((st) => st.fares);
   const notes = fares ? fareNotes(fares.fares, fares.tipCeilingLamports) : [];
+  const ceiling = fares?.tipCeilingLamports ? `${fares.tipCeilingLamports / 1e9} SOL` : "";
+  const market = fares?.pricing === "market-percentile";
+  const stepped = fares?.fares.some((f) => f.stepApplied);
   return (
     <div className={s.notes} aria-live="polite">
       {notes.map((n) => (
-        <p key={n.text.slice(0, 40)} className={s.same}>
+        <p key={n.text.slice(0, 40)} className={`${s.same} ${n.kind === "gain" ? s.quiet : ""}`}>
           <span className={`${s.sameMark} ${n.kind === "unmet" ? s.unmetMark : ""}`} aria-hidden="true">
-            {n.kind === "unmet" ? "!" : "="}
+            {NOTE_MARK[n.kind]}
           </span>
           {n.text}
         </p>
       ))}
       <details className={s.method}>
-        <summary>How these estimates work</summary>
-        <div className={s.methodBody}>
-          <p>
-            Each fare is a target, not a separate lane: a deadline in blocks and the chance Tipwise aims for. Every fare is sent the same way, through
-            Solami Beam with the same priority fee, so two fares with the same tip are the same transaction.
-          </p>
-          <p>
-            The tip is the cheapest range of tips Beam accepts whose estimated chance reaches the target. Estimates come from real test trips in each
-            range: ten trips that all land give about 92%, an estimate from ten observations, not a measured long-run rate.
-            {fares?.fares[0]?.estimate
-              ? " Where a pricier range did worse than a cheaper one, the two are averaged, since a bigger tip is assumed not to lower the chance. A range with too few trips borrows the estimate of the cheaper range below it."
-              : ""}
-          </p>
-          <p>
-            If no range reaches a fare&apos;s target, the board shows the cheapest tip with the best estimate and marks the target as not met. Tips above
-            the {fares?.tipCeilingLamports ? `${fares.tipCeilingLamports / 1e9} SOL` : ""} ceiling are never quoted or tested. Times in seconds assume 0.4
-            seconds per block and are approximate.
-          </p>
-        </div>
+        <summary>How prices and estimates work</summary>
+        {market ? (
+          <div className={s.methodBody}>
+            <p>Prices come from where landed tips sit today; chances come from Tipwise&apos;s test trips.</p>
+            <p>
+              Saver pays the typical landed tip, the median of tips at or above the Beam minimum over the last 600 blocks (about four minutes). Standard pays
+              the 75th percentile, the top quarter, and Express the 90th, the top tenth. Each price is the median of its last five readings, rounded to two
+              significant figures, so it does not flicker. If two fares would share a price, the pricier one is raised to at least 1.25 times the one below
+              {stepped ? " (applied right now)" : ""}. Tips are capped at the {ceiling} ceiling, the only case where two fares can share a price.
+            </p>
+            <p>
+              Each fare is a target: a deadline in blocks and the chance its estimate is judged against. The chance shown is our estimate for the range
+              the fare&apos;s tip falls in, from real test trips through Solami Beam: ten trips that all land give about 92%, an estimate from ten
+              observations, not a measured long-run rate. Where a pricier range did worse than a cheaper one, the two are averaged. A range with too few
+              trips borrows the estimate of the cheaper range below it.
+            </p>
+            <p>
+              A higher tip buys position when blocks get crowded. It does not guarantee an earlier block, and our test trips may not show a gain. Every
+              fare is sent the same way, through Beam with the same priority fee. Times in seconds assume 0.4 seconds per block and are approximate.
+            </p>
+          </div>
+        ) : (
+          <div className={s.methodBody}>
+            <p>
+              Each fare is a target, not a separate lane: a deadline in blocks and the chance Tipwise aims for. Every fare is sent the same way, through
+              Solami Beam with the same priority fee, so two fares with the same tip are the same transaction.
+            </p>
+            <p>
+              The tip is the cheapest range of tips Beam accepts whose estimated chance reaches the target. Estimates come from real test trips in each
+              range: ten trips that all land give about 92%, an estimate from ten observations, not a measured long-run rate.
+              {fares?.fares[0]?.estimate
+                ? " Where a pricier range did worse than a cheaper one, the two are averaged, since a bigger tip is assumed not to lower the chance. A range with too few trips borrows the estimate of the cheaper range below it."
+                : ""}
+            </p>
+            <p>
+              If no range reaches a fare&apos;s target, the board shows the cheapest tip with the best estimate and marks the target as not met. Tips above
+              the {ceiling} ceiling are never quoted or tested. Times in seconds assume 0.4 seconds per block and are approximate.
+            </p>
+          </div>
+        )}
       </details>
     </div>
   );

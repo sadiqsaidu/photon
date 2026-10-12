@@ -156,6 +156,10 @@ export function SendTest() {
           Fare
         </h2>
         <FarePicker fares={fares?.fares ?? null} value={fare} onChange={setFare} />
+        <p className="small muted" style={{ marginTop: 12 }}>
+          Prices come from where landed tips sit today; chances come from Tipwise&apos;s test trips. A higher tip buys position in crowded blocks but does
+          not guarantee an earlier one.
+        </p>
       </section>
 
       <section className={s.choices} aria-label="How to send">

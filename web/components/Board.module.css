@@ -169,9 +169,13 @@
   .chanceValue {
     justify-content: flex-end;
   }
-  .fare .sub,
-  .tip .sub {
+  .fare .sub {
     display: none;
+  }
+  .tip .sub {
+    contain: inline-size;
+    font-size: 12px;
+    line-height: 1.35;
   }
   .fareFlaps {
     font-size: 20px;

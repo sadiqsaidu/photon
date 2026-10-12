@@ -47,7 +47,18 @@ export interface Group {
 const SIG = "5EHzvLSo8dk6wwm5WW2FpqpRytJgdY4JF5KVkHY178ArMMKPFfJVfkFVHcsWQcAR8nNGqJgK3keAN9VPQJSG2U4R";
 const WALLET = "XUrKb2aK4jBm77q75EemchVUNRTJyeFQ5KebTJygPhF";
 
-const fareExample = (id: string, label: string, deadlineSlots: number, confidence: number, tip: number, probability: number, landed: number) => ({
+const fareExample = (
+  id: string,
+  label: string,
+  deadlineSlots: number,
+  confidence: number,
+  tip: number,
+  probability: number,
+  landed: number,
+  bucket: { lo: number; hi: number },
+  tipPercentile: number,
+  probabilityAtCheaperTip: number | null,
+) => ({
   id,
   label,
   deadlineSlots,
@@ -59,9 +70,12 @@ const fareExample = (id: string, label: string, deadlineSlots: number, confidenc
   priorityFeeMicroLamports: 0,
   probability,
   meetsConfidence: probability >= confidence,
-  bucket: { lo: 0, hi: 25 },
+  bucket,
   estimate: { basis: "measured", samples: 10, landed, newestSlot: 455799012 },
   ceilingLimited: false,
+  tipPercentile,
+  stepApplied: false,
+  probabilityAtCheaperTip,
 });
 
 const receiptExample = {
@@ -101,7 +115,7 @@ export const GROUPS: Group[] = [
     title: "Fares and custom quotes",
     intro: [
       "A fare is a target: a deadline in slots and the chance Tipwise aims for. GET /fares prices the three fixed fares the site shows. GET /quote prices any deadline and confidence you choose.",
-      "The two use different forecast horizons. Fares price the live window as it is now (forecastHorizonSlots, currently 0). A custom quote projects the tip distribution forward by its own deadline, so GET /quote?deadline=4&confidence=0.9 can return a different tip from the Standard fare even though the targets match.",
+      "The two price differently. Fares are market prices: fixed percentiles of today's landed tips, with the estimated chance reported for the tip that results. A custom quote works the other way round: it returns the cheapest tip whose estimated chance meets your target, projected forward by its own deadline. So GET /quote?deadline=4&confidence=0.9 usually returns a lower tip than the Standard fare even though the targets match.",
     ],
     endpoints: [
       {
@@ -109,10 +123,19 @@ export const GROUPS: Group[] = [
         method: "GET",
         path: "/fares",
         title: "Live fares",
-        purpose: ["Saver, Standard and Express, each priced at the cheapest range of tips Beam accepts whose estimated chance meets the fare's target. If none does, the fare is the cheapest tip with the best estimate and meetsConfidence is false."],
+        purpose: [
+          "Saver, Standard and Express, priced from where landed tips sit today: the 50th, 75th and 90th percentile of landed tips at or above the Beam minimum over the last 600 slots. Chances come from Tipwise's test trips.",
+          "Each price is floored at the Beam minimum and capped at the tip ceiling. Fares are strictly ordered: if a pricier fare would not sit above the one below (for example when both land on the Beam minimum), it is raised to at least 1.25 times that fare and stepApplied is true. Each tip is the median of its last five readings (one every 2 s), rounded to two significant figures and held until the median moves more than 5%. Two fares share a price only at the ceiling, and then ceilingLimited is true.",
+          "probability is the estimate for the percentile range the final tip falls in, at the fare's own deadline; meetsConfidence compares it to the fare's target. The target no longer chooses the price. A higher tip buys position when blocks get crowded, but nothing here guarantees an earlier block.",
+        ],
         curl: (b) => `curl ${b}/fares`,
         example: {
-          fares: [fareExample("saver", "Saver", 10, 0.8, 109624, 0.917, 10), fareExample("standard", "Standard", 4, 0.9, 109624, 0.917, 10), { ...fareExample("express", "Express", 1, 0.9, 109624, 0.667, 7) }],
+          fares: [
+            fareExample("saver", "Saver", 10, 0.8, 130000, 0.917, 10, { lo: 25, hi: 50 }, 50, null),
+            fareExample("standard", "Standard", 4, 0.9, 210000, 0.917, 10, { lo: 50, hi: 75 }, 75, 0.917),
+            fareExample("express", "Express", 1, 0.9, 420000, 0.667, 7, { lo: 75, hi: 90 }, 90, 0.667),
+          ],
+          pricing: "market-percentile",
           calibrated: true,
           progress: { done: 40, needed: 40 },
           samples: 1486,
@@ -129,8 +152,13 @@ export const GROUPS: Group[] = [
           { name: "fares[].tipLamports, tipSol, tipUsd", detail: "The recommended tip. tipUsd is null when the SOL price is unavailable." },
           { name: "fares[].priorityFeeMicroLamports", detail: "Compute unit price in micro-lamports per compute unit: p75 of recent prioritization fees, the same for every fare." },
           { name: "fares[].probability", detail: "Estimated chance that a transaction with this tip lands within deadlineSlots, from test trips in the tip's range." },
-          { name: "fares[].meetsConfidence", detail: "true when probability is at least confidence. false means the target is not met and the fare is a best effort." },
-          { name: "fares[].bucket, estimate, ceilingLimited", detail: "Which percentile range of tips the price sits in; where its estimate comes from (basis measured, inherited or prior, with samples, landed and the newest probe's slot); and whether better options may exist above the tip ceiling." },
+          { name: "fares[].meetsConfidence", detail: "true when probability is at least confidence. false means the estimate for this price falls short of the target; the price itself still follows the market." },
+          { name: "fares[].bucket, estimate", detail: "Which percentile range of tips the final tip sits in, and where its estimate comes from: basis measured, inherited or prior, with samples, landed and the newest probe's slot." },
+          { name: "fares[].tipPercentile", detail: "Optional. The percentile of landed tips the fare is priced at: 50, 75 or 90." },
+          { name: "fares[].stepApplied", detail: "Optional. true when the fare was raised to at least 1.25 times the fare below because the two would otherwise collide." },
+          { name: "fares[].ceilingLimited", detail: "true when the tip ceiling held the price below where the market percentile or the step put it." },
+          { name: "fares[].probabilityAtCheaperTip", detail: "Optional. The estimate for the next cheaper fare's tip at this fare's deadline: compare it with probability to see what paying more is measured to add. null for Saver." },
+          { name: "pricing", detail: "Optional. \"market-percentile\" on servers that price fares this way. Absent on older servers, which priced each fare at the cheapest range meeting its target." },
           { name: "calibrated, progress", detail: "Whether every reachable range has 10 test trips, and how many of the needed trips are done." },
           { name: "samples", detail: "Landed tips at or above the Beam minimum in the 600 slot window the prices come from." },
           { name: "mood", detail: "Median tip of the last 50 slots against the window median. Context only; it does not change the estimates." },
@@ -142,7 +170,10 @@ export const GROUPS: Group[] = [
         method: "GET",
         path: "/quote",
         title: "Custom quote",
-        purpose: ["A tip for any deadline and confidence, with the estimate for every percentile range so you can see what a higher tip would or would not buy."],
+        purpose: [
+          "A tip for any deadline and confidence, with the estimate for every percentile range so you can see what a higher tip would or would not buy.",
+          "Unlike GET /fares, a quote is the cheapest range whose estimated chance meets your target. If none does, it is the cheapest tip with the best estimate and meetsConfidence is false.",
+        ],
         params: [
           { name: "deadline", in: "query", type: "integer, slots", required: false, default: "2", detail: "1 to 32. Decimals are rounded." },
           { name: "confidence", in: "query", type: "number", required: false, default: "0.9", detail: "0.01 to 0.999. With 10 test trips per range the estimate tops out at 11/12 (about 0.917), so higher targets come back with meetsConfidence false." },
