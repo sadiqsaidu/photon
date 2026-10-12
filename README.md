@@ -228,7 +228,7 @@ Production run of the hosted instance (Solami region ams), October 11, 2026.
 | Hosted API | https://api.tipwise.tech (try `/health`, `/fares`, `/calibration`) |
 | Test trips | 40 sent, 40 landed through Beam, 39 within 2 blocks and one in 3 (last 30: 15 in 1 block, 14 in 2, 1 in 3) |
 | Calibration | Complete: every reachable bucket has 10 probes. Brier score 0.126 against a 2 block deadline (the starting estimates were cautious: 39 of 40 trips landed within 2 blocks). |
-| Fares at the time of writing | Saver 10 blocks: 125,000 lamports, 92%; Standard 4 blocks: 125,000 lamports, 92%; Express 1 block: 125,000 lamports, 67% (best effort). At 1 block the pricier buckets did not land faster (tips of 500,000 lamports and up landed in 1 block less often than tips near the Beam floor), so Express quotes the cheapest tip with its real chance. |
+| Fares observed | October 11, about 21:30 UTC: Saver (10 blocks) 125,000 lamports, estimated 92%; Standard (4 blocks) 125,000 lamports, 92%; Express (1 block) 125,000 lamports, 67%, below its 90% target. October 12, 11:03 UTC (`GET /fares`, before the estimator update in this README was deployed): all three 111,814 lamports with 0.917, 0.917 and 0.667. At 1 block no pricier range showed a better estimate than the cheapest, so Express was quoted at the cheapest tip and marked below target. These are estimates from 10 test trips per range; they do not show that larger tips land slower. |
 | Lag result | No lead: best correlation r = 0.067 at k = 3 blocks over 887 blocks, below the 0.2 threshold, so the forecast does not use heat. |
 | Solami products | All eight live at the time of writing (Yellowstone gRPC, Mirage, Blur, Beam, RPC, Data API, Webhooks, Leader tracking). |
 
