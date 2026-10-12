@@ -34,7 +34,7 @@ export function money(lamports: number, price: number | null | undefined): strin
   return d === null ? sol(lamports) : `${usd(d)} (${sol(lamports)})`;
 }
 
-export const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
+export const seconds = (ms: number) => `${(ms / 1000).toFixed(1)}\u00a0s`;
 export const blocksToSeconds = (blocks: number) => seconds(blocks * SLOT_MS);
 export const blocks = (n: number) => `${group(n)} ${n === 1 ? "block" : "blocks"}`;
 export const pct = (p: number) => `${Math.round(p * 100)}%`;

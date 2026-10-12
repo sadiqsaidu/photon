@@ -32,8 +32,8 @@ export function ticketLines(r: R, price: number | null): Line[] {
     const kept = land !== null && r.failure === null && land.blocks <= r.deadlineSlots;
     lines.push(
       { kind: "rule" },
-      { kind: "item", label: "Promise", value: `${pct(r.quotedProbability)} within ${r.deadlineSlots}` },
-      { kind: "item", label: "Promise kept", value: r.settled || land ? (kept ? "yes" : "no") : "pending" },
+      { kind: "item", label: "Estimate", value: `${pct(r.quotedProbability)} within ${r.deadlineSlots}` },
+      { kind: "item", label: "Within target", value: r.settled || land ? (kept ? "yes" : "no") : "pending" },
     );
   }
   lines.push({ kind: "rule" });

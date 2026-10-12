@@ -26,7 +26,7 @@ import { HttpError, limiter, type Handler } from "./server.js";
 import { solPrice, rpc } from "./solami.js";
 import type { StreamHealth } from "./stream.js";
 import { distribution, mood, tipState, topPayers } from "./tips.js";
-import { auditRefreshed, onWebhookPost, watchWallet } from "./watch.js";
+import { auditRefreshed, onWebhookPost, watchedCount, watchWallet } from "./watch.js";
 
 export interface Context {
   startedAt: number;
@@ -112,7 +112,8 @@ export function routes(ctx: Context): Record<string, Handler> {
   };
   return {
     "GET /health": () => ({
-      ok: ctx.streams().every((s) => s.connected),
+      // The webhook stream idles on purpose while no wallet is being watched.
+      ok: ctx.streams().every((s) => s.connected || (s.name === "webhooks" && watchedCount() === 0)),
       slot: ctx.slot(),
       behind: ctx.behind(),
       maxBehind: ctx.maxBehind(),

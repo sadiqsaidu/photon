@@ -51,12 +51,12 @@ function Dumbbell({ data }: { data: TR }) {
                     <span className={`${s.dot} ${s.promised}`} style={{ left: `${r.promised! * 100}%` }} aria-hidden="true" />
                     <span className={`${s.dot} ${s.delivered}`} style={{ left: `${r.delivered! * 100}%` }} aria-hidden="true" />
                     <span className="sr-only">
-                      Promised {pct(r.promised!)}, delivered {pct(r.delivered!)}.
+                      Estimated {pct(r.promised!)}, landed in time {pct(r.delivered!)}.
                     </span>
                   </>
                 )}
               </div>
-              <div className={s.values}>{tested ? `${pct(r.promised!)} promised, ${pct(r.delivered!)} on time` : ""}</div>
+              <div className={s.values}>{tested ? `${pct(r.promised!)} estimated, ${pct(r.delivered!)} in time` : ""}</div>
             </li>
           );
         })}
@@ -64,30 +64,32 @@ function Dumbbell({ data }: { data: TR }) {
       <div className={s.legend}>
         <span>
           <i className={`${s.key} ${s.promised}`} />
-          What we promised
+          What we estimated before each trip
         </span>
         <span>
           <i className={`${s.key} ${s.delivered}`} />
-          What actually happened
+          What happened
         </span>
       </div>
     </div>
   );
 }
 
-// Which way the gap goes matters: cautious starting estimates that the trips
-// beat read very differently from promises the trips missed.
-function verdict(data: TR, now: number | null): string {
+// Estimates that ran low and estimates that ran high are both calibration
+// errors; the direction says which way to read the gap.
+function verdict(data: TR): string {
   if (data.trips === 0) return "No test trips have settled yet. The first ones go out a minute after the server starts.";
   const used = data.rows.filter((r) => r.n > 0 && r.promised !== null && r.delivered !== null);
   const total = used.reduce((a, r) => a + r.n, 0) || 1;
-  const promised = used.reduce((a, r) => a + r.n * (r.promised as number), 0) / total;
+  const estimated = used.reduce((a, r) => a + r.n * (r.promised as number), 0) / total;
   const delivered = used.reduce((a, r) => a + r.n * (r.delivered as number), 0) / total;
   const trips = `${number(data.trips)} test trips`;
-  if (delivered - promised > 0.05)
-    return `We under-promised. Across ${trips}, Tipwise promised ${pct(promised)} on average and ${pct(delivered)} landed on time: the starting estimates were cautious.${now === null ? "" : ` With every price range tested, the board now promises ${pct(now)}.`}`;
-  if (promised - delivered > 0.05) return `We over-promised. Across ${trips}, Tipwise promised ${pct(promised)} on average and only ${pct(delivered)} landed on time.`;
-  return `Across ${trips}, we were within ${data.averageGapPoints ?? 0} points of what we promised on average.`;
+  const gap = `${data.averageGapPoints ?? 0} points`;
+  if (delivered - estimated > 0.05)
+    return `Estimates ran low. Across ${trips}, Tipwise estimated ${pct(estimated)} on average before each trip and ${pct(delivered)} landed in time, an average gap of ${gap}. Too cautious is still a calibration error.`;
+  if (estimated - delivered > 0.05)
+    return `Estimates ran high. Across ${trips}, Tipwise estimated ${pct(estimated)} on average before each trip and ${pct(delivered)} landed in time, an average gap of ${gap}.`;
+  return `Across ${trips}, the estimates made before each trip were within ${gap} of what happened on average.`;
 }
 
 function Stub({ r, price }: { r: Receipt; price: number | null }) {
@@ -145,19 +147,19 @@ export function TrackRecordView() {
           <section className={s.block} aria-labelledby="promise-title">
             <div className={s.head}>
               <h2 id="promise-title" className="h2">
-                Promise versus reality
+                Estimate versus outcome
               </h2>
               <p className="muted">
                 The chance of landing within {blocks(data.deadlineSlots)} ({blocksToSeconds(data.deadlineSlots)}), the Standard fare, by how much a
-                trip tipped compared with other tips Beam accepts. Each trip is scored against what Tipwise would have promised before it was sent.
+                trip tipped compared with other tips Beam accepts. Each trip is scored against what Tipwise would have estimated before it was sent, at the same deadline.
               </p>
             </div>
             <p className={s.summary}>
-              {verdict(data, fares?.fares.find((f) => f.id === "standard")?.probability ?? null)}{" "}
+              {verdict(data)}{" "}
               {fares?.calibrated
                 ? "Predictions are checked: every price range Tipwise quotes has at least 10 test trips."
                 : progress
-                  ? `Still learning: ${progress.done} of ${progress.needed} test trips done. Until then the promises are starting estimates.`
+                  ? `Still learning: ${progress.done} of ${progress.needed} test trips done. Until then the estimates for untested ranges are starting estimates.`
                   : ""}
             </p>
             <Dumbbell data={data} />

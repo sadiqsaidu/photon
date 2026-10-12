@@ -137,3 +137,36 @@
   color: var(--amber);
   font: 700 13px/1 var(--display);
 }
+
+.notes {
+  margin-top: 4px;
+}
+
+.method {
+  margin-top: 14px;
+  font-size: 15px;
+  color: var(--ink-2);
+  max-width: 75ch;
+}
+
+.method summary {
+  cursor: pointer;
+  width: fit-content;
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+}
+
+.methodBody {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.unmetMark {
+  background: var(--amber-dim);
+  color: var(--board);
+}

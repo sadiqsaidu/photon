@@ -102,3 +102,18 @@ export function holt(alpha = 0.3, beta = 0.1) {
     level: () => level,
   };
 }
+
+// Weighted isotonic (non-decreasing) fit by pooling adjacent violators: where
+// a higher index has a lower value, the two are replaced by their weighted mean.
+export function isotonic(values: number[], weights: number[]): number[] {
+  const blocks: { v: number; w: number; n: number }[] = [];
+  values.forEach((v, i) => {
+    blocks.push({ v, w: weights[i] ?? 1, n: 1 });
+    while (blocks.length > 1 && (blocks.at(-2) as { v: number }).v > (blocks.at(-1) as { v: number }).v) {
+      const b = blocks.pop() as { v: number; w: number; n: number };
+      const a = blocks.pop() as { v: number; w: number; n: number };
+      blocks.push({ v: (a.v * a.w + b.v * b.w) / (a.w + b.w), w: a.w + b.w, n: a.n + b.n });
+    }
+  });
+  return blocks.flatMap((b) => Array.from({ length: b.n }, () => b.v));
+}

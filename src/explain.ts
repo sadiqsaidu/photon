@@ -20,15 +20,15 @@ function landed(r: Receipt, slot: number): Explanation {
     return { verdict: "landed", title, whatHappened: `It went into block ${slot.toLocaleString("en-US")} and is ${stage}.`, whatToDo: "Nothing to fix. The tip was enough to get in." };
   }
   const pct = Math.round(r.quotedProbability * 100);
-  const promise = `We promised ${pct}% within ${plural(r.deadlineSlots, "block")}. It took ${blocks}`;
+  const estimate = `We estimated a ${pct}% chance of landing within ${plural(r.deadlineSlots, "block")}. It took ${blocks}`;
   if (blocks <= r.deadlineSlots) {
-    return { verdict: "landed", title, whatHappened: `${promise}, so the promise was kept.`, whatToDo: "Nothing to fix. The tip was enough to get in on time." };
+    return { verdict: "landed", title, whatHappened: `${estimate}, within the target.`, whatToDo: "Nothing to fix. The tip was enough to get in on time." };
   }
   return {
     verdict: "landed",
     title,
-    whatHappened: `${promise}, later than promised. At this fare that happens on about ${100 - pct}% of trips.`,
-    whatToDo: "If the deadline matters to you, pick a faster fare.",
+    whatHappened: `${estimate}, past the target. The estimate left room for this on about ${100 - pct}% of trips.`,
+    whatToDo: "If the deadline matters, compare the estimated chance of each fare before you send. A different label does not add priority when the tip and fee are the same.",
   };
 }
 

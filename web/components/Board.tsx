@@ -13,11 +13,15 @@ export const MOOD_WORD: Record<Mood, string> = { quiet: "Quiet", busy: "Busy", r
 const STALE_MS = 10_000;
 const ANNOUNCE_MS = 10_000;
 
-const BLURBS: Record<string, string> = {
-  saver: "Cheapest that usually lands",
-  standard: "The sensible default",
-  express: "When every block counts",
-};
+const targetText = (f: { confidence: number; deadlineSlots: number }) => `Target: ${pct(f.confidence)} within ${blocks(f.deadlineSlots)}`;
+
+function chanceNote(f: Fare): string {
+  const basis = f.estimate?.basis;
+  if (basis === "prior") return "starting estimate";
+  const trips = f.estimate && basis === "measured" ? `, ${f.estimate.samples} test trips` : "";
+  if (basis === "inherited") return f.meetsConfidence ? "meets target, from a cheaper range" : `below ${pct(f.confidence)} target`;
+  return f.meetsConfidence ? `meets ${pct(f.confidence)} target${trips}` : `below ${pct(f.confidence)} target${trips}`;
+}
 
 function tipText(f: Fare): string {
   if (f.tipUsd === null) return f.tipSol.toFixed(6);
@@ -40,23 +44,9 @@ export function sameAs(fares: Fare[], f: Fare): Fare | null {
   return fares.find((x) => x.id !== f.id && x.tipLamports === f.tipLamports && fares.indexOf(x) < fares.indexOf(f)) ?? null;
 }
 
-// Equal prices are a real state, not a glitch: the cheapest fare already
-// lands fast enough, or a bigger tip would not raise the chance.
-export function samePriceLine(fares: Fare[], calibrated: boolean): string | null {
-  const [saver, standard, express] = fares;
-  if (!saver || !standard || !express) return null;
-  const floor = calibrated && saver.meetsConfidence;
-  const cause = floor ? "Quiet market: the cheapest tip is landing fast" : "A bigger tip would not raise the chance right now";
-  if (saver.tipLamports === standard.tipLamports && standard.tipLamports === express.tipLamports)
-    return `${cause}, so all three fares cost the same right now.${express.meetsConfidence ? "" : " A bigger tip would not make Express any faster."}`;
-  if (saver.tipLamports === standard.tipLamports) return `${cause}, so Standard costs the same as Saver right now.`;
-  if (standard.tipLamports === express.tipLamports) return `${floor ? cause : "Paying more would not make it land faster right now"}, so Express costs the same as Standard right now.`;
-  return null;
-}
-
 function summary(fares: Fare[]): string {
   return fares
-    .map((f) => `${f.label}: ${usd(f.tipUsd) || sol(f.tipLamports)}, lands within ${(f.deadlineMs / 1000).toFixed(1)} seconds, ${pct(f.probability)} chance${f.meetsConfidence ? "" : ", best effort"}.`)
+    .map((f) => `${f.label}: ${usd(f.tipUsd) || sol(f.tipLamports)} tip, estimated ${pct(f.probability)} chance within ${blocks(f.deadlineSlots)}, ${f.meetsConfidence ? "meets" : "below"} the ${pct(f.confidence)} target.`)
     .join(" ");
 }
 
@@ -105,8 +95,8 @@ export function Board() {
       <div className={s.cols} aria-hidden="true">
         <span>Fare</span>
         <span>Tip</span>
-        <span>Arrives within</span>
-        <span>On time</span>
+        <span>Target time</span>
+        <span>Estimated chance</span>
       </div>
 
       <ul className={s.rows}>
@@ -117,25 +107,25 @@ export function Board() {
             <li key={row.id} className={s.row}>
               <div className={s.fare}>
                 <Flaps text={row.label} length={8} offset={offset} className={s.fareFlaps} label={row.label} />
-                <span className={s.sub}>{BLURBS[row.id]}</span>
+                <span className={s.sub}>{f ? targetText(f) : "\u00a0"}</span>
               </div>
               <div className={s.tip}>
                 <Flaps text={f ? tipText(f) : cycling} length={6} align="right" offset={offset + 60} className={s.big} label={f ? `Tip ${usd(f.tipUsd) || sol(f.tipLamports)}` : undefined} />
-                <span className={s.sub}>{f ? `${sol(f.tipLamports)}${sameAs(rows, f) ? `, same as ${sameAs(rows, f)!.label}` : ""}` : " "}</span>
+                <span className={s.sub}>{f ? `${sol(f.tipLamports)}${sameAs(rows, f) ? `, same tip as ${sameAs(rows, f)!.label}` : ""}` : " "}</span>
               </div>
               <div className={s.time}>
                 <span className={s.timeValue}>
-                  <Flaps text={f ? (f.deadlineMs / 1000).toFixed(1) : ""} length={3} align="right" offset={offset + 120} className={s.big} label={f ? `${(f.deadlineMs / 1000).toFixed(1)} seconds` : undefined} />
+                  <Flaps text={f ? (f.deadlineMs / 1000).toFixed(1) : ""} length={3} align="right" offset={offset + 120} className={s.big} label={f ? `Target time about ${(f.deadlineMs / 1000).toFixed(1)} seconds` : undefined} />
                   <span className={s.unit}>s</span>
                 </span>
-                <span className={s.sub}>{f ? blocks(f.deadlineSlots) : " "}</span>
+                <span className={s.sub}>{f ? `${blocks(f.deadlineSlots)}, approx.` : " "}</span>
               </div>
               <div className={`${s.chance} ${f && !f.meetsConfidence ? s.dim : ""}`}>
                 <span className={s.chanceValue}>
                   <span className={`${s.lamp} ${f ? (f.meetsConfidence ? s.ok : s.effort) : ""}`} aria-hidden="true" />
-                  <Flaps text={f ? pct(f.probability) : ""} length={3} align="right" offset={offset + 180} className={s.big} label={f ? `${pct(f.probability)} chance` : undefined} />
+                  <Flaps text={f ? pct(f.probability) : ""} length={3} align="right" offset={offset + 180} className={s.big} label={f ? `Estimated ${pct(f.probability)} chance` : undefined} />
                 </span>
-                <span className={s.sub}>{f ? (f.meetsConfidence ? (fares?.calibrated ? "chance it lands in time" : "starting estimate") : "best effort") : " "}</span>
+                <span className={s.sub}>{f ? chanceNote(f) : " "}</span>
               </div>
             </li>
           );

@@ -4,14 +4,15 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useLive } from "@/lib/live";
 import type { Mood } from "@/lib/types";
-import { MOOD_WORD, samePriceLine } from "./Board";
+import { fareNotes } from "@/lib/fareNotes";
+import { MOOD_WORD } from "./Board";
 import { FlapTile } from "./Flap";
 import s from "./Home.module.css";
 
 const MOOD_LINE: Record<Mood, string> = {
   quiet: "Tips in the last 20 seconds are below the usual level. A good moment to pay less.",
   busy: "Tips in the last 20 seconds are close to the usual level for the last 4 minutes.",
-  rush: "Tips in the last 20 seconds are well above the usual level. Getting in fast costs more right now.",
+  rush: "Tips in the last 20 seconds are well above the usual level for the last 4 minutes.",
 };
 
 export function MoodGauge() {
@@ -40,17 +41,41 @@ export function MoodGauge() {
   );
 }
 
-export function SamePrice() {
+export function FareNotes() {
   const fares = useLive((st) => st.fares);
-  const line = fares ? samePriceLine(fares.fares, fares.calibrated) : null;
-  if (!line) return null;
+  const notes = fares ? fareNotes(fares.fares, fares.tipCeilingLamports) : [];
   return (
-    <p className={s.same} aria-live="polite">
-      <span className={s.sameMark} aria-hidden="true">
-        =
-      </span>
-      {line}
-    </p>
+    <div className={s.notes} aria-live="polite">
+      {notes.map((n) => (
+        <p key={n.text.slice(0, 40)} className={s.same}>
+          <span className={`${s.sameMark} ${n.kind === "unmet" ? s.unmetMark : ""}`} aria-hidden="true">
+            {n.kind === "unmet" ? "!" : "="}
+          </span>
+          {n.text}
+        </p>
+      ))}
+      <details className={s.method}>
+        <summary>How these estimates work</summary>
+        <div className={s.methodBody}>
+          <p>
+            Each fare is a target, not a separate lane: a deadline in blocks and the chance Tipwise aims for. Every fare is sent the same way, through
+            Solami Beam with the same priority fee, so two fares with the same tip are the same transaction.
+          </p>
+          <p>
+            The tip is the cheapest range of tips Beam accepts whose estimated chance reaches the target. Estimates come from real test trips in each
+            range: ten trips that all land give about 92%, an estimate from ten observations, not a measured long-run rate.
+            {fares?.fares[0]?.estimate
+              ? " Where a pricier range did worse than a cheaper one, the two are averaged, since a bigger tip is assumed not to lower the chance. A range with too few trips borrows the estimate of the cheaper range below it."
+              : ""}
+          </p>
+          <p>
+            If no range reaches a fare&apos;s target, the board shows the cheapest tip with the best estimate and marks the target as not met. Tips above
+            the {fares?.tipCeilingLamports ? `${fares.tipCeilingLamports / 1e9} SOL` : ""} ceiling are never quoted or tested. Times in seconds assume 0.4
+            seconds per block and are approximate.
+          </p>
+        </div>
+      </details>
+    </div>
   );
 }
 
@@ -63,7 +88,7 @@ export function Learning() {
       <p className={s.learning}>
         <FlapTile className={s.mini} />
         <span>
-          Every chance on this board is checked against {trips?.trips ?? fares.progress.needed} real test trips.{" "}
+          Estimates come from {trips?.trips ?? fares.progress.needed} real test trips through Beam.{" "}
           <Link href="/track-record">See the track record</Link>
         </span>
       </p>

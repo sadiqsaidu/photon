@@ -5,8 +5,10 @@ import type { Fare, FareId } from "@/lib/types";
 import { Flaps } from "./Flap";
 import s from "./FarePicker.module.css";
 
-export function promiseText(f: Fare): string {
-  return `${usd(f.tipUsd) ? `about ${usd(f.tipUsd)}` : sol(f.tipLamports)}, lands within ${seconds(f.deadlineMs)} ${pct(f.probability)} of the time${f.meetsConfidence ? "" : " (best effort)"}`;
+export function fareText(f: Fare): string {
+  const tip = usd(f.tipUsd) ? `about ${usd(f.tipUsd)}` : sol(f.tipLamports);
+  const within = `within ${f.deadlineSlots} ${f.deadlineSlots === 1 ? "block" : "blocks"} (about ${seconds(f.deadlineMs)})`;
+  return `${tip}. Estimated ${pct(f.probability)} chance ${within}${f.meetsConfidence ? "" : `, below the ${pct(f.confidence)} target`}.`;
 }
 
 export function FarePicker({ fares, value, onChange, name = "fare" }: { fares: Fare[] | null; value: FareId; onChange: (id: FareId) => void; name?: string }) {
@@ -26,7 +28,7 @@ export function FarePicker({ fares, value, onChange, name = "fare" }: { fares: F
             <span className={s.price}>
               <Flaps text={tip} length={6} align="right" className={s.priceFlaps} />
             </span>
-            <span className={s.promise}>{ready ? promiseText(f) : "Waiting for the live fare"}</span>
+            <span className={s.promise}>{ready ? fareText(f) : "Waiting for the live fare"}</span>
           </label>
         );
       })}

@@ -10,6 +10,9 @@ export interface Quote {
   meetsConfidence: boolean;
   calibrated: boolean;
   bucket: { lo: number; hi: number };
+  estimate?: Estimate;
+  ceilingLimited?: boolean;
+  forecastHorizonSlots?: number;
   distribution: { source: "beam" | "combined"; samples: number; beamFloorPercentile: number };
   heatMultiplier: number;
 }
@@ -26,6 +29,16 @@ export interface Fare {
   priorityFeeMicroLamports: number;
   probability: number;
   meetsConfidence: boolean;
+  bucket?: { lo: number; hi: number };
+  estimate?: Estimate;
+  ceilingLimited?: boolean;
+}
+
+export interface Estimate {
+  basis: "measured" | "inherited" | "prior";
+  samples: number;
+  landed: number;
+  newestSlot: number | null;
 }
 
 export interface Receipt {

@@ -16,6 +16,9 @@ export interface Fare {
   priorityFeeMicroLamports: number;
   probability: number;
   meetsConfidence: boolean;
+  bucket?: { lo: number; hi: number };
+  estimate?: { basis: "measured" | "inherited" | "prior"; samples: number; landed: number; newestSlot: number | null };
+  ceilingLimited?: boolean;
 }
 
 export interface Fares {
@@ -26,6 +29,9 @@ export interface Fares {
   solPriceUsd: number | null;
   mood?: { mood: Mood; ratio: number };
   updatedAt?: number;
+  forecastHorizonSlots?: number;
+  tipCeilingLamports?: number;
+  slotMs?: number;
 }
 
 export interface WindowRow {

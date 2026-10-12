@@ -7,7 +7,7 @@ vi.mock("../src/solami.js", () => ({
 }));
 
 const { FARES, SLOT_MS } = await import("../src/config.js");
-const { capByFaster, fares, progress, trackRecord } = await import("../src/quote.js");
+const { fares, progress, trackRecord } = await import("../src/quote.js");
 const { moodOf, rankPayers } = await import("../src/tips.js");
 const { explain } = await import("../src/explain.js");
 const { limiter } = await import("../src/server.js");
@@ -28,11 +28,6 @@ describe("fares", () => {
       expect(typeof f.meetsConfidence).toBe("boolean");
     }
     expect(out).toMatchObject({ calibrated: false, solPriceUsd: 150, progress: { done: 0, needed: 50 } });
-  });
-
-  it("never lets a slower fare cost more than a faster one", () => {
-    const out = capByFaster([{ tipLamports: 900 }, { tipLamports: 500 }, { tipLamports: 700 }]);
-    expect(out.map((f) => f.tipLamports)).toEqual([500, 500, 700]);
   });
 
   it("asks for no confidence the smoothed model cannot reach with 10 probes per bucket", () => {
@@ -125,13 +120,13 @@ describe("explain", () => {
     expect(explain({ ...base, settled: false })).toBeNull();
   });
 
-  it("says how fast it landed and whether the promise was kept", () => {
+  it("says how fast it landed and whether it met the estimate's target", () => {
     const kept = explain({ ...base, landedSlot: 103, stages: { ...base.stages, processed: { slot: 103, ms: 1_210 } }, fare: "standard", quotedProbability: 0.9, deadlineSlots: 6 });
     expect(kept).toMatchObject({ verdict: "landed", title: "Landed in 3 blocks (1.2 s)." });
-    expect(kept?.whatHappened).toBe("We promised 90% within 6 blocks. It took 3, so the promise was kept.");
+    expect(kept?.whatHappened).toBe("We estimated a 90% chance of landing within 6 blocks. It took 3, within the target.");
     const late = explain({ ...base, landedSlot: 108, fare: "express", quotedProbability: 0.6, deadlineSlots: 3 });
     expect(late?.title).toBe("Landed in 8 blocks (3.2 s).");
-    expect(late?.whatHappened).toContain("later than promised");
+    expect(late?.whatHappened).toContain("past the target");
     expect(explain({ ...base, landedSlot: 101 })?.title).toBe("Landed in 1 block (0.4 s).");
   });
 

@@ -10,7 +10,7 @@ import {
   SLOT_MS,
 } from "./config.js";
 import { rpc } from "./solami.js";
-import { percentile, rankOf } from "./stats.js";
+import { isotonic, percentile, rankOf } from "./stats.js";
 import { distribution, floorPercentile, forecastAt, heatMultiplier } from "./tips.js";
 
 // Calibration scores every probe against this deadline.
@@ -21,7 +21,12 @@ const TOP_PERCENTILE = 99;
 export interface ProbeOutcome {
   bucket: number;
   slotsToLand: number | null;
+  sentSlot?: number;
 }
+
+// Where a bucket's estimate comes from: its own probes, the measured bucket
+// below it (too few probes of its own), or the starting prior (nothing measured).
+export type Basis = "measured" | "inherited" | "prior";
 
 const ALL_REACHABLE = BUCKETS.map(() => true);
 
@@ -56,28 +61,39 @@ export function reachableBuckets(sorted: number[]): boolean[] {
   return sorted.length ? BUCKETS.map((_, i) => tipForBucket(sorted, i) !== null) : ALL_REACHABLE;
 }
 
+// Per bucket: Laplace-smoothed rate (landed + 1) / (n + 2) from buckets with at
+// least MIN_BUCKET_PROBES probes, made non-decreasing by a weighted isotonic fit
+// (a bigger tip is assumed not to lower the chance; contradictions are pooled,
+// not copied upward). Thinner buckets inherit from the measured bucket below,
+// or keep their prior when no measured bucket sits below them.
 export function landingModel(outcomes: ProbeOutcome[], deadline: number, reachable = ALL_REACHABLE) {
-  const buckets = BUCKETS.map((b, i) => {
+  const raw = BUCKETS.map((b, i) => {
     const mine = outcomes.filter((o) => o.bucket === i);
     const landed = mine.filter((o) => o.slotsToLand !== null && o.slotsToLand <= deadline).length;
-    return { ...b, n: mine.length, landed, p: (landed + 1) / (mine.length + 2), reachable: reachable[i] as boolean };
+    const slots = mine.map((o) => o.sentSlot).filter((x): x is number => typeof x === "number");
+    return { ...b, n: mine.length, landed, newestSlot: slots.length ? Math.max(...slots) : null, reachable: reachable[i] as boolean };
   });
-  let floor = 0;
-  for (const b of buckets) floor = b.p = Math.max(floor, b.p);
+  const measured = raw.map((b) => b.n >= MIN_BUCKET_PROBES);
+  const fitted = isotonic(
+    raw.filter((_, i) => measured[i]).map((b) => (b.landed + 1) / (b.n + 2)),
+    raw.filter((_, i) => measured[i]).map((b) => b.n + 2),
+  );
+  let k = 0;
+  const own = raw.map((_, i) => (measured[i] ? (fitted[k++] as number) : null));
+  const buckets = raw.map((b, i) => {
+    if (own[i] !== null) return { ...b, p: own[i] as number, basis: "measured" as Basis };
+    const below = own.slice(0, i).filter((v): v is number => v !== null).at(-1);
+    if (below !== undefined) return { ...b, p: below, basis: "inherited" as Basis };
+    const above = own.slice(i + 1).find((v): v is number => v !== null);
+    return { ...b, p: above === undefined ? b.prior : Math.min(b.prior, above), basis: "prior" as Basis };
+  });
   // Calibrated means every bucket a quote can price has enough probes.
   return { buckets, calibrated: buckets.every((b) => !b.reachable || b.n >= MIN_BUCKET_PROBES) };
 }
 
 export function probabilities(outcomes: ProbeOutcome[], deadline: number, reachable = ALL_REACHABLE): { p: number[]; calibrated: boolean } {
   const model = landingModel(outcomes, deadline, reachable);
-  if (model.calibrated) return { p: model.buckets.map((b) => b.p), calibrated: true };
-  // A bucket with enough probes keeps its measured rate even while another
-  // one (newly reachable as the market moves) is still being filled.
-  // Thin buckets carry the rate below them, never a prior above measured data.
-  if (!model.buckets.some((b) => b.n >= MIN_BUCKET_PROBES)) return { p: BUCKETS.map((b) => b.prior), calibrated: false };
-  let floor = 0;
-  const p = model.buckets.map((b) => (floor = b.n >= MIN_BUCKET_PROBES ? Math.max(floor, (b.landed + 1) / (b.n + 2)) : floor));
-  return { p, calibrated: false };
+  return { p: model.buckets.map((b) => b.p), calibrated: model.calibrated };
 }
 
 export function pickBucket(p: number[], confidence: number, reachable = ALL_REACHABLE): { index: number; meetsConfidence: boolean } {
@@ -90,10 +106,12 @@ export function pickBucket(p: number[], confidence: number, reachable = ALL_REAC
   return { index: open.find((b) => b.v >= best - 1e-9)?.i ?? p.length - 1, meetsConfidence: false };
 }
 
-function bucketPrice(index: number, horizon: number): number {
+// The bucket's upper edge, forecast `horizon` slots ahead, floored at the Beam
+// minimum; the caller applies the tip ceiling.
+function rawPrice(index: number, horizon: number): number {
   const b = BUCKETS[index] as (typeof BUCKETS)[number];
   const pct = b.hi >= 100 ? TOP_PERCENTILE : b.hi;
-  return Math.min(config.tipCeilingLamports, Math.max(BEAM_MIN_TIP, forecastAt(pct, horizon)));
+  return Math.max(BEAM_MIN_TIP, forecastAt(pct, horizon));
 }
 
 let feeCache: { at: number; value: number } | null = null;
@@ -173,59 +191,75 @@ export function progress(outcomes: ProbeOutcome[], reachable = ALL_REACHABLE): {
   return { done, needed };
 }
 
-// A slower fare never costs more than a faster one.
-export function capByFaster<T extends { tipLamports: number }>(slowestFirst: T[]): T[] {
-  const out = slowestFirst.map((f) => ({ ...f }));
-  for (let i = out.length - 2; i >= 0; i--) {
-    const faster = out[i + 1] as T;
-    if ((out[i] as T).tipLamports > faster.tipLamports) (out[i] as T).tipLamports = faster.tipLamports;
-  }
-  return out;
-}
-
+// Every fare is quoted on its own with the same forecast horizon, so prices
+// only differ by bucket. A slower deadline never lowers a bucket's estimate
+// (landing within 10 slots includes landing within 4), so a slower fare that
+// meets its target never needs a pricier bucket than a faster fare that meets
+// its own. A faster fare that misses its target can still be cheaper: it is a
+// best effort at a different target, and its estimate says so.
 export async function fares(outcomes: ProbeOutcome[], solPriceUsd: number | null) {
   const quotes = await Promise.all(FARES.map((f) => quote(f.deadlineSlots, f.confidence, outcomes, FARE_FORECAST_SLOTS)));
-  const priced = capByFaster(FARES.map((f, i) => ({ fare: f, q: quotes[i] as Awaited<ReturnType<typeof quote>>, tipLamports: (quotes[i] as { tipLamports: number }).tipLamports })));
   const dist = distribution();
   return {
-    fares: priced.map(({ fare, q, tipLamports }) => ({
-      id: fare.id,
-      label: fare.label,
-      deadlineSlots: fare.deadlineSlots,
-      deadlineMs: fare.deadlineSlots * SLOT_MS,
-      confidence: fare.confidence,
-      tipLamports,
-      tipSol: tipLamports / LAMPORTS_PER_SOL,
-      tipUsd: solPriceUsd === null ? null : Math.round((tipLamports / LAMPORTS_PER_SOL) * solPriceUsd * 10_000) / 10_000,
-      priorityFeeMicroLamports: q.priorityFeeMicroLamports,
-      probability: q.probability,
-      meetsConfidence: q.meetsConfidence,
-    })),
+    fares: FARES.map((fare, i) => {
+      const q = quotes[i] as Awaited<ReturnType<typeof quote>>;
+      return {
+        id: fare.id,
+        label: fare.label,
+        deadlineSlots: fare.deadlineSlots,
+        deadlineMs: fare.deadlineSlots * SLOT_MS,
+        confidence: fare.confidence,
+        tipLamports: q.tipLamports,
+        tipSol: q.tipSol,
+        tipUsd: solPriceUsd === null ? null : Math.round((q.tipLamports / LAMPORTS_PER_SOL) * solPriceUsd * 10_000) / 10_000,
+        priorityFeeMicroLamports: q.priorityFeeMicroLamports,
+        probability: q.probability,
+        meetsConfidence: q.meetsConfidence,
+        bucket: q.bucket,
+        estimate: q.estimate,
+        ceilingLimited: q.ceilingLimited,
+      };
+    }),
     calibrated: quotes[0]?.calibrated ?? false,
     progress: progress(outcomes, reachableBuckets(dist.sorted)),
     samples: dist.sorted.length,
     solPriceUsd,
+    forecastHorizonSlots: FARE_FORECAST_SLOTS,
+    tipCeilingLamports: config.tipCeilingLamports,
+    slotMs: SLOT_MS,
   };
 }
 
 export async function quote(deadline: number, confidence: number, outcomes: ProbeOutcome[], horizon = deadline) {
   const dist = distribution();
   const reachable = reachableBuckets(dist.sorted);
-  const { p, calibrated } = probabilities(outcomes, deadline, reachable);
-  const { index, meetsConfidence } = pickBucket(p, confidence, reachable);
-  const tipLamports = bucketPrice(index, horizon);
+  const model = landingModel(outcomes, deadline, reachable);
+  const p = model.buckets.map((b) => b.p);
+  const picked = pickBucket(p, confidence, reachable);
+  const raw = rawPrice(picked.index, horizon);
+  const tipLamports = Math.min(config.tipCeilingLamports, raw);
+  // A tip clamped down by the ceiling can sit in a cheaper bucket than the one
+  // picked; the estimate must describe the tip actually quoted.
+  const index = raw > config.tipCeilingLamports && dist.sorted.length ? Math.min(picked.index, bucketOf(rankOf(dist.sorted, tipLamports))) : picked.index;
+  const chosen = model.buckets[index] as (typeof model.buckets)[number];
+  const probability = Math.round(chosen.p * 1000) / 1000;
+  const meetsConfidence = chosen.p >= confidence;
   return {
     deadlineSlots: deadline,
     confidence,
     tipLamports,
     tipSol: tipLamports / LAMPORTS_PER_SOL,
     priorityFeeMicroLamports: await priorityFee(),
-    probability: Math.round((p[index] as number) * 1000) / 1000,
+    probability,
     meetsConfidence,
-    calibrated,
-    bucket: { lo: BUCKETS[index]?.lo, hi: BUCKETS[index]?.hi },
-    buckets: BUCKETS.map((b, i) => ({ lo: b.lo, hi: b.hi, p: p[i], status: reachable[i] ? "reachable" : "above tip ceiling" })),
+    calibrated: model.calibrated,
+    bucket: { lo: chosen.lo, hi: chosen.hi },
+    estimate: { basis: chosen.basis, samples: chosen.n, landed: chosen.landed, newestSlot: chosen.newestSlot },
+    // A better estimate may exist above the tip ceiling, where Tipwise never quotes or probes.
+    ceilingLimited: !meetsConfidence && (raw > config.tipCeilingLamports || reachable.slice(index + 1).some((r) => !r)),
+    buckets: model.buckets.map((b) => ({ lo: b.lo, hi: b.hi, p: Math.round(b.p * 1000) / 1000, n: b.n, basis: b.basis, status: b.reachable ? "reachable" : "above tip ceiling" })),
     tipCeilingLamports: config.tipCeilingLamports,
+    forecastHorizonSlots: horizon,
     distribution: { source: dist.source, samples: dist.sorted.length, beamFloorPercentile: floorPercentile() },
     heatMultiplier: heatMultiplier(),
   };
