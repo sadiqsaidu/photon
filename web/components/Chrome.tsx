@@ -30,38 +30,23 @@ export function StatusDot({ status }: { status: ProductStatus }) {
   return <span className={`${s.status} ${s[status]}`} aria-hidden="true" />;
 }
 
-const PRODUCT_ORDER = ["Yellowstone gRPC", "Mirage", "Blur", "Beam", "RPC", "Data API", "Webhooks", "Leader tracking"];
-
 export function Footer() {
-  const products = useLive((st) => st.products);
-  const byName = new Map(products.map((p) => [p.name, p]));
   return (
     <footer className={s.footer}>
-      <div className="wrap">
-        <div className={s.strip}>
-          <Link href="/under-the-hood" className={s.title}>
-            Running live on Solami
-          </Link>
-          <ul className={s.products}>
-            {PRODUCT_ORDER.map((name) => {
-              const p = byName.get(name);
-              const status: ProductStatus = p?.status ?? "idle";
-              return (
-                <li key={name}>
-                  <Link href="/under-the-hood" className={s.product} title={p?.metric}>
-                    <StatusDot status={status} />
-                    {name}
-                    <span className="sr-only">: {STATUS_WORD[status]}</span>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
+      <div className={`wrap ${s.inner}`}>
+        <Link href="/under-the-hood" className={`btn ${s.peek}`}>
+          Peek under the hood
+          <svg className={s.chevron} width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false">
+            <path d="M5 3l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </Link>
         <div className={s.meta}>
-          <span>Built for the Solami track at the Crypto World&apos;s Fair.</span>
-          <a href="https://github.com/sadiqsaidu/tipwise">Source on GitHub</a>
-          <Link href="/under-the-hood">Under the hood</Link>
+          <a href="https://github.com/sadiqsaidu/tipwise" className={s.link}>
+            GitHub
+          </a>
+          <a href="https://solami.dev" className={s.powered}>
+            Powered by Solami
+          </a>
         </div>
       </div>
     </footer>
