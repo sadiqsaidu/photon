@@ -21,8 +21,8 @@ const listOf = (names: string[]) => (names.length < 2 ? (names[0] ?? "") : `${na
 export function tipPosition(percentile: number): string {
   if (percentile >= 90) return "near the top of";
   if (percentile >= 75) return "in the top quarter of";
-  if (percentile > 50) return "above most of";
-  return "in the middle of";
+  if (percentile >= 50) return "at or above the middle of";
+  return "at the lower end of";
 }
 
 // The board's words for where a fare's tip sits; null on servers that do not
@@ -33,7 +33,8 @@ export function tipStanding(f: Pick<FareLike, "tipPercentile" | "ceilingLimited"
   if (f.tipPercentile >= 90) return "top tenth of landed tips";
   if (f.tipPercentile >= 75) return "top quarter of landed tips";
   if (f.tipPercentile > 50) return "above most landed tips";
-  return "the typical landed tip";
+  if (f.tipPercentile === 50) return "the typical landed tip";
+  return "lower end of landed tips";
 }
 
 // Short, factual notes for the board. Prices come from where landed tips sit

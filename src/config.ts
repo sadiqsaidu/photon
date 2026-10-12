@@ -106,14 +106,15 @@ export const PROBE_COMPUTE_UNIT_LIMIT = 20_000;
 
 export const SLOT_MS = 400;
 export type FareId = "saver" | "standard" | "express";
-// Prices follow the live distribution of eligible landed tips: Saver at the
-// median, Standard at p75, Express at p90. The target is what each estimate is
+// Prices follow the live distribution of eligible landed tips: Saver at p25,
+// Standard at the median, Express at p75, so all three stay under the tip
+// ceiling on a typical day. The target is what each estimate is
 // judged against; it does not choose the price. With 10 probes per bucket the
 // smoothed (landed + 1) / (n + 2) tops out at 11/12, so no target exceeds 0.9.
 export const FARES: { id: FareId; label: string; deadlineSlots: number; confidence: number; tipPercentile: number }[] = [
-  { id: "saver", label: "Saver", deadlineSlots: 10, confidence: 0.8, tipPercentile: 50 },
-  { id: "standard", label: "Standard", deadlineSlots: 4, confidence: 0.9, tipPercentile: 75 },
-  { id: "express", label: "Express", deadlineSlots: 1, confidence: 0.9, tipPercentile: 90 },
+  { id: "saver", label: "Saver", deadlineSlots: 10, confidence: 0.8, tipPercentile: 25 },
+  { id: "standard", label: "Standard", deadlineSlots: 4, confidence: 0.9, tipPercentile: 50 },
+  { id: "express", label: "Express", deadlineSlots: 1, confidence: 0.9, tipPercentile: 75 },
 ];
 // A pricier fare that collides with the one below is raised to this multiple of it.
 export const FARE_MIN_STEP = 1.25;

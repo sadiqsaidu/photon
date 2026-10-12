@@ -65,8 +65,8 @@ export function FareNotes() {
           <div className={s.methodBody}>
             <p>Prices come from where landed tips sit today; chances come from Tipwise&apos;s test trips.</p>
             <p>
-              Saver pays the typical landed tip, the median of tips at or above the Beam minimum over the last 600 blocks (about four minutes). Standard pays
-              the 75th percentile, the top quarter, and Express the 90th, the top tenth. Each price is the median of its last five readings, rounded to two
+              Saver pays the lower end of landed tips, the 25th percentile of tips at or above the Beam minimum over the last 600 blocks (about four
+              minutes). Standard pays the typical tip, the median, and Express the 75th percentile, the top quarter. Each price is the median of its last five readings, rounded to two
               significant figures, so it does not flicker. If two fares would share a price, the pricier one is raised to at least 1.25 times the one below
               {stepped ? " (applied right now)" : ""}. Tips are capped at the {ceiling} ceiling, the only case where two fares can share a price.
             </p>
