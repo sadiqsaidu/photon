@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 import type { Endpoint, ErrorCase, Param } from "./content";
 import s from "./Docs.module.css";
 
@@ -56,16 +56,40 @@ export function CopyButton({ text, label = "Copy" }: { text: string; label?: str
   );
 }
 
+// Longer blocks start collapsed to COLLAPSED_LINES with a fade; the copy
+// button always copies the whole block.
+const COLLAPSE_ABOVE = 14;
+
 export function CodeBlock({ code, lang, title }: { code: string; lang: Lang; title?: string }) {
+  const id = useId();
+  const figure = useRef<HTMLElement>(null);
+  const lines = code.split("\n").length;
+  const collapsible = lines > COLLAPSE_ABOVE;
+  const [open, setOpen] = useState(false);
+  const toggle = () => {
+    setOpen((o) => !o);
+    const top = figure.current?.getBoundingClientRect().top ?? 0;
+    if (open && top < 0) {
+      const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      figure.current?.scrollIntoView({ block: "start", behavior: still ? "auto" : "smooth" });
+    }
+  };
   return (
-    <figure className={s.code}>
+    <figure ref={figure} className={`${s.code} ${collapsible && !open ? s.collapsed : ""}`}>
       <figcaption className={s.codeHead}>
         <span>{title ?? LANG_LABEL[lang]}</span>
         <CopyButton text={code} />
       </figcaption>
-      <pre tabIndex={0}>
-        <code>{highlight(code, lang)}</code>
-      </pre>
+      <div className={s.codeBody}>
+        <pre id={id} tabIndex={0}>
+          <code>{highlight(code, lang)}</code>
+        </pre>
+      </div>
+      {collapsible && (
+        <button type="button" className={s.more} aria-expanded={open} aria-controls={id} onClick={toggle}>
+          {open ? "Show less" : `Show all ${lines} lines`}
+        </button>
+      )}
     </figure>
   );
 }

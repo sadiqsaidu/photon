@@ -30,6 +30,70 @@
   outline-offset: -2px;
 }
 
+.codeBody {
+  position: relative;
+}
+
+.collapsed pre {
+  max-height: calc(10 * 1.65em + 16px);
+  overflow-y: hidden;
+}
+
+.collapsed .codeBody::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 72px;
+  background: linear-gradient(rgba(17, 19, 22, 0), var(--board) 85%);
+  pointer-events: none;
+}
+
+.more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-top: 1px solid #262a31;
+  background: #15181c;
+  color: #e6e8eb;
+  font: 600 14px/1 var(--body);
+  cursor: pointer;
+}
+
+.more:hover {
+  background: #1d2126;
+}
+
+.more:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: -2px;
+}
+
+.more::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+}
+
+.more[aria-expanded="true"]::after {
+  transform: translateY(2px) rotate(-135deg);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .more::after {
+    transition: transform 0.15s ease;
+  }
+}
+
 .copy {
   font: 600 13px/1 var(--body);
   padding: 0 12px;
