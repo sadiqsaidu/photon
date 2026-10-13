@@ -175,7 +175,7 @@ async function serve(): Promise<void> {
     const race = raceStats();
     console.log(
       `[status] slot ${processed} behind ${behind} (max ${maxBehind}) | grpc queue ${grpc.queue?.depth} (max ${grpc.queue?.maxDepth}, shed ${grpc.queue?.dropped}) | ` +
-        `${streams().map((s) => `${s.name} ${s.connected ? "up" : "down"} r${s.reconnects} bp${s.backpressureClosures}`).join(", ")} | ` +
+        `${streams().map((s) => `${s.name} ${s.connected ? "up" : s.idle ? "idle" : "down"} r${s.reconnects} bp${s.backpressureClosures}`).join(", ")} | ` +
         `quote samples ${t.samples}, beam floor at p${t.floorPercentile} | race grpc ${race.wins.grpc} mirage ${race.wins.mirage} | ` +
         `lag k=${t.lag.k} r=${t.lag.r} | probe budget left ${budgetState().leftLamports}`,
     );

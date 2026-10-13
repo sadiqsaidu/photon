@@ -479,6 +479,7 @@ export const GROUPS: Group[] = [
         fields: [
           { name: "behind, maxBehind", detail: "Slots between Tipwise's stream and Solami's chain tip, now and at worst since start." },
           { name: "degraded", detail: "Features Solami refused (missing permission, plan or balance), each { feature, error }." },
+          { name: "streams[].idle", detail: "true while a stream is paused on purpose: the webhooks stream runs only while a wallet is watched. An idle stream has no error, counts no reconnects and does not affect ok." },
         ],
       },
       {

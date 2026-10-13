@@ -100,7 +100,7 @@ function startHookStream(): void {
   hookStream = supervise(
     "webhooks",
     (health, signal) => wsSession(solami.webhookStreamUrl(hook?.id ?? id), health, signal, (data) => enqueue(JSON.parse(data.toString()) as solami.WebhookEvent)),
-    () => hook !== null,
+    () => hook !== null && live.size > 0,
   );
 }
 

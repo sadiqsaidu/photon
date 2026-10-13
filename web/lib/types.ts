@@ -69,6 +69,7 @@ export interface StreamHealth {
   error: string | null;
   blocked: string | null;
   backpressureClosures: number;
+  idle?: boolean;
   queue?: { depth: number; maxDepth: number; capacity: number; dropped: number };
 }
 

@@ -12,6 +12,8 @@ export interface StreamHealth {
   // Set when Solami refuses the stream (auth, plan or billing); retried slowly.
   blocked: string | null;
   backpressureClosures: number;
+  // Paused on purpose (`active` returned false): no session, no error, no reconnects.
+  idle?: boolean;
   queue?: { depth: number; maxDepth: number; capacity: number; dropped: number };
 }
 
@@ -39,10 +41,12 @@ export function supervise(name: string, session: Session, active: () => boolean 
     let blockedBackoff = BLOCKED_FIRST_RETRY_MS;
     for (;;) {
       if (!active()) {
-        health.connected = false;
+        if (!health.idle) bus.emit("stream", { ...health, connected: false, error: null, idle: true });
+        Object.assign(health, { connected: false, error: null, blocked: null, idle: true });
         await sleep(2_000);
         continue;
       }
+      health.idle = false;
       const ctrl = new AbortController();
       const startedAt = Date.now();
       health.lastEventAt = startedAt;
@@ -63,6 +67,8 @@ export function supervise(name: string, session: Session, active: () => boolean 
         ctrl.abort();
       }
       health.connected = false;
+      // Paused while the session ran (the last watch expired): idle, not a fault.
+      if (!active()) continue;
       health.reconnects++;
       health.blocked = blocked ? health.error : null;
       if (health.lastEventAt - startedAt > 5_000) backoff = 500;

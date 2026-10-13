@@ -160,7 +160,7 @@ The site's [developer documentation](https://tipwise.tech/developers) covers eve
 
 | Method and path | Returns |
 | --- | --- |
-| `GET /health` | Stream health (connected, bytes, reconnects, backpressure closures, queue depth), slots behind and the maximum, degraded features. In memory, cheap. |
+| `GET /health` | Stream health (connected, idle, bytes, reconnects, backpressure closures, queue depth), slots behind and the maximum, degraded features. The webhooks stream reports `idle: true` while no wallet is watched. In memory, cheap. |
 | `GET /events` | Server-sent events: `slot`, `tips`, `heat`, `lag`, `quote`, `fares` (at most every 2 s, on change), `products` (every 5 s), `probe`, `lifecycle` (with `explanation`), `stream`, `audit`. Heartbeat every 15 s. |
 | `GET /stats` | Snapshot for the first paint: 600 slot window, mood, fares, SOL price, Solami products, calibration, track record, recent receipts. |
 | `GET /fares` | Saver, Standard and Express: `{ id, label, deadlineSlots, deadlineMs, confidence, tipLamports, tipSol, tipUsd, priorityFeeMicroLamports, probability, meetsConfidence, bucket, estimate, ceilingLimited }`, plus `calibrated`, `progress`, `samples`, `solPriceUsd`, `forecastHorizonSlots`, `tipCeilingLamports`, `slotMs`, `mood`, `updatedAt`. `estimate` is `{ basis: measured, inherited or prior, samples, landed, newestSlot }`. |
