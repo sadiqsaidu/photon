@@ -156,6 +156,9 @@ export const LEADER_SKIP_SLOTS = 4;
 export const AUDIT_DEFAULT_LIMIT = 100;
 export const AUDIT_MAX_LIMIT = 300;
 export const AUDIT_CONCURRENCY = 8;
+// The monthly overpay projection needs this much history; a busy bot can fill
+// a checkup with a minute of trades, and a month extrapolated from that misleads.
+export const AUDIT_PROJECTION_MIN_SEC = 10 * 60;
 
 export const STREAM_STALE_MS = 15_000;
 export const BACKOFF_MAX_MS = 15_000;

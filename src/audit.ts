@@ -1,6 +1,7 @@
 import bs58 from "bs58";
 import {
   AUDIT_CONCURRENCY,
+  AUDIT_PROJECTION_MIN_SEC,
   BASE_FEE_PER_SIGNATURE,
   config,
   JITO_TIP_ACCOUNTS,
@@ -86,7 +87,6 @@ export function analyze(tx: RpcTx, wallet: string, tipAccounts: Set<string>, ben
 }
 
 const MONTH_SEC = 30 * 86_400;
-const PROJECTION_MIN_SEC = 10;
 
 export type Stamp = "overpaid" | "fair" | "too_low";
 
@@ -106,7 +106,7 @@ export function summarize(txs: AuditTx[], solPrice: number | null) {
   const to = times.length ? Math.max(...times) : null;
   const span = from !== null && to !== null ? to - from : 0;
   const usd = (lamports: number) => (solPrice === null ? null : Math.round((lamports / LAMPORTS_PER_SOL) * solPrice * 100) / 100);
-  const monthly = span >= PROJECTION_MIN_SEC ? Math.round((overpay / span) * MONTH_SEC) : null;
+  const monthly = span >= AUDIT_PROJECTION_MIN_SEC ? Math.round((overpay / span) * MONTH_SEC) : null;
   const underpaid = tipped.filter((t) => t.underpaid).length;
   return {
     periodFrom: from,

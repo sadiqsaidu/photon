@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "@/lib/api";
-import { duration, isAddress, lamportsToUsd, number, sol, solscan, shortAddress, usd } from "@/lib/format";
+import { duration, isAddress, lamportsToUsd, number, showsProjection, sol, solscan, shortAddress, usd } from "@/lib/format";
 import { onEvent } from "@/lib/live";
 import type { Audit, AuditSummary, AuditTx } from "@/lib/types";
 import { PrinterWaiting, Receipt, type Line } from "./Receipt";
@@ -198,7 +198,7 @@ export function CheckResult({ address }: { address: string }) {
     { kind: "item", label: "Paid above going rate", value: money(sm.overpayLamports), strong: true },
     { kind: "item", label: "Too low to compete", value: `${sm.underpaidCount} ${sm.underpaidCount === 1 ? "tip" : "tips"}` },
   ];
-  if (sm.monthlyOverpayLamports !== null && sm.overpayLamports > 0) {
+  if (showsProjection(sm) && sm.monthlyOverpayLamports !== null) {
     lines.push(
       { kind: "rule" },
       { kind: "text", value: "At this pace, about" },

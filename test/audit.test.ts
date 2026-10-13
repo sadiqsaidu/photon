@@ -79,3 +79,23 @@ describe("analyze and summarize", () => {
     expect(summarize(txs, null).overpayUsd).toBeNull();
   });
 });
+
+describe("monthly projection", () => {
+  const tx = (blockTime: number) => ({ signature: `s${blockTime}`, slot: blockTime, blockTime, success: true, tip: 2_000_000, priorityFee: 0, slotP25: 500_000, slotP50: 1_000_000, slotP75: 1_500_000, overpay: 1_000_000, underpaid: false });
+
+  it("is left out when the tips span less than 10 minutes", async () => {
+    const { showsProjection } = await import("../web/lib/format.js");
+    const short = summarize(Array.from({ length: 75 }, (_, i) => tx(1_000 + i)), 100);
+    expect(short.monthlyOverpayLamports).toBeNull();
+    expect(short.monthlyOverpayUsd).toBeNull();
+    expect(showsProjection(short)).toBe(false);
+    expect(showsProjection({ ...short, monthlyOverpayLamports: 37_738_000_000 })).toBe(false);
+  });
+
+  it("projects over 30 days once the tips span 10 minutes", async () => {
+    const { showsProjection } = await import("../web/lib/format.js");
+    const s = summarize([tx(0), tx(600)], 100);
+    expect(s.monthlyOverpayLamports).toBe(Math.round((2_000_000 / 600) * 30 * 86_400));
+    expect(showsProjection(s)).toBe(true);
+  });
+});

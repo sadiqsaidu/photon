@@ -1,5 +1,12 @@
 export const LAMPORTS_PER_SOL = 1_000_000_000;
 export const SLOT_MS = 400;
+// Matches AUDIT_PROJECTION_MIN_SEC on the API; older servers projected from less.
+export const PROJECTION_MIN_SEC = 10 * 60;
+
+export function showsProjection(s: { monthlyOverpayLamports: number | null; overpayLamports: number; periodFrom: number | null; periodTo: number | null }): boolean {
+  if (s.monthlyOverpayLamports === null || s.overpayLamports <= 0 || s.periodFrom === null || s.periodTo === null) return false;
+  return s.periodTo - s.periodFrom >= PROJECTION_MIN_SEC;
+}
 
 const group = (n: number) => n.toLocaleString("en-US");
 

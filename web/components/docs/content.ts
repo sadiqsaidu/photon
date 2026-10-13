@@ -354,7 +354,7 @@ export const GROUPS: Group[] = [
           { name: "summary.goingRateLamports, overpayLamports", detail: "Going rate is the median tip that landed in the same slot. Overpay is the part of each tip above it, an estimate: a smaller tip might still have landed." },
           { name: "summary.underpaidCount", detail: "Tips below the cheapest quarter of tips in their slot." },
           { name: "summary.stamp", detail: "overpaid (over 30% of tips above the going rate), too_low (over 25% of compared tips too low) or fair." },
-          { name: "summary.monthlyOverpayLamports", detail: "Overpay projected over 30 days from the time span covered; null under 10 seconds of history." },
+          { name: "summary.monthlyOverpayLamports", detail: "Overpay projected over 30 days from the time span covered; null when the analyzed tips span less than 10 minutes, since a month extrapolated from a minute of trades misleads." },
           { name: "txs[].slotP25, slotP50, slotP75", detail: "Tips that landed in the same slot; null when the slot could not be compared." },
         ],
         errors: [
