@@ -85,7 +85,7 @@ describe("fares price from where landed tips sit today", () => {
     config.tipCeilingLamports = 2_000_000;
     const outcomes = [
       ...trips(0, [...repeat(1, 9), 12]),
-      ...trips(1, [...repeat(1, 6), ...repeat(2, 4)]),
+      ...trips(1, [...repeat(1, 6), ...repeat(3, 4)]),
       ...trips(2, repeat(1, 10)),
     ];
     const out = await fares(outcomes, 100);
@@ -152,7 +152,7 @@ describe("server-paid demo sends", () => {
   it("check the budget against the fare's actual tip", async () => {
     const { demoRefusal } = await import("../src/probe.js");
     const budget = Math.round(config.probeBudgetSol * 1e9);
-    const base = { id: "express" as const, priorityFeeMicroLamports: 0, probability: 0.9, deadlineSlots: 1 };
+    const base = { id: "express" as const, priorityFeeMicroLamports: 0, probability: 0.9, deadlineSlots: 2 };
     expect(demoRefusal({ ...base, tipLamports: 1_000_000 })).toBeNull();
     expect(demoRefusal({ ...base, tipLamports: budget })?.reason).toBe("budget");
   });

@@ -111,10 +111,12 @@ export type FareId = "saver" | "standard" | "express";
 // ceiling on a typical day. The target is what each estimate is
 // judged against; it does not choose the price. With 10 probes per bucket the
 // smoothed (landed + 1) / (n + 2) tops out at 11/12, so no target exceeds 0.9.
+// Express allows 2 slots: about half of all test trips land in the very next
+// slot at any tip, because a send usually needs one or two slots to reach the leader.
 export const FARES: { id: FareId; label: string; deadlineSlots: number; confidence: number; tipPercentile: number }[] = [
   { id: "saver", label: "Saver", deadlineSlots: 10, confidence: 0.8, tipPercentile: 25 },
   { id: "standard", label: "Standard", deadlineSlots: 4, confidence: 0.9, tipPercentile: 50 },
-  { id: "express", label: "Express", deadlineSlots: 1, confidence: 0.9, tipPercentile: 75 },
+  { id: "express", label: "Express", deadlineSlots: 2, confidence: 0.85, tipPercentile: 75 },
 ];
 // A pricier fare that collides with the one below is raised to this multiple of it.
 export const FARE_MIN_STEP = 1.25;

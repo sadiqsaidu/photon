@@ -133,7 +133,7 @@ export const GROUPS: Group[] = [
           fares: [
             fareExample("saver", "Saver", 10, 0.8, 130000, 0.917, 10, { lo: 0, hi: 25 }, 25, null),
             fareExample("standard", "Standard", 4, 0.9, 300000, 0.917, 10, { lo: 25, hi: 50 }, 50, 0.917),
-            fareExample("express", "Express", 1, 0.9, 950000, 0.667, 7, { lo: 50, hi: 75 }, 75, 0.667),
+            fareExample("express", "Express", 2, 0.85, 700000, 0.896, 10, { lo: 50, hi: 75 }, 75, 0.896),
           ],
           pricing: "market-percentile",
           calibrated: true,
