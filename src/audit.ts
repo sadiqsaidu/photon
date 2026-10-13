@@ -196,9 +196,30 @@ async function blockStats(slot: number, tipAccounts: Set<string>): Promise<SlotS
 async function benchmarks(slots: number[], tipAccounts: Set<string>, maxBlocks: number) {
   const bench = new Map<number, SlotStats>((await slotRows(slots)).map((r) => [r.slot, r]));
   const missing = [...new Set(slots)].filter((s) => !bench.has(s)).sort((a, b) => b - a).slice(0, maxBlocks);
-  const fetched = await mapLimit(missing, AUDIT_CONCURRENCY, (s) => blockStats(s, tipAccounts));
+  // A block that just landed can briefly be unavailable, and a full busy block
+  // can time out; that trade gets no comparison instead of failing the checkup.
+  const failed: string[] = [];
+  const fetched = await mapLimit(missing, AUDIT_CONCURRENCY, (s) =>
+    blockStats(s, tipAccounts).catch((e: Error) => {
+      failed.push(`${s} ${auditErrorClass(e)}`);
+      return null;
+    }),
+  );
+  if (failed.length) console.warn(`[audit] getBlock failed for ${failed.length} of ${missing.length} blocks: ${failed.slice(0, 5).join(", ")}`);
   fetched.forEach((r) => r && bench.set(r.slot, r));
-  return { bench, blocksFetched: missing.length };
+  return { bench, blocksFetched: missing.length, blocksFailed: failed.length };
+}
+
+export type AuditErrorClass = "rate_limited" | "timeout" | "block_unavailable" | "history_failed" | "upstream";
+
+export function auditErrorClass(e: unknown): AuditErrorClass {
+  const msg = e instanceof Error ? e.message : String(e);
+  const status = e instanceof solami.SolamiError ? e.status : undefined;
+  if (status === 429 || /\b429\b|rate.?limit|too many/i.test(msg)) return "rate_limited";
+  if (/timeout|timed out|aborted/i.test(msg)) return "timeout";
+  if (/-3200[479]|not available|skipped/i.test(msg)) return "block_unavailable";
+  if (/getSignaturesForAddress|getTransaction|getTransactionsForAddress/.test(msg)) return "history_failed";
+  return "upstream";
 }
 
 export const tipSet = async () => new Set([...JITO_TIP_ACCOUNTS, ...(await solami.beamTipAddresses())]);
@@ -207,11 +228,11 @@ const solPrice = async () => solami.solPrice().usd ?? (await solami.solPriceUsd(
 export async function runAudit(address: string, limit: number) {
   const tips = await tipSet();
   const { txs, source } = await history(address, limit);
-  const { bench, blocksFetched } = await benchmarks(txs.filter((t) => tipPaid(t, address, tips) > 0).map((t) => t.slot), tips, config.auditMaxBlocks);
+  const { bench, blocksFetched, blocksFailed } = await benchmarks(txs.filter((t) => tipPaid(t, address, tips) > 0).map((t) => t.slot), tips, config.auditMaxBlocks);
   const analyzed = txs.map((t) => analyze(t, address, tips, bench));
   const price = await solPrice();
   const prev = (await loadAudit(address)) as { watching?: boolean } | null;
-  const audit = { address, limit, historySource: source, blocksFetched, solPriceUsd: price, watching: prev?.watching ?? false, updatedAt: Date.now(), summary: summarize(analyzed, price), txs: analyzed };
+  const audit = { address, limit, historySource: source, blocksFetched, blocksFailed, solPriceUsd: price, watching: prev?.watching ?? false, updatedAt: Date.now(), summary: summarize(analyzed, price), txs: analyzed };
   await saveAudit(address, audit);
   return audit;
 }

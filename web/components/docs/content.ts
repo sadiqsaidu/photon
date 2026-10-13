@@ -355,11 +355,13 @@ export const GROUPS: Group[] = [
           { name: "summary.underpaidCount", detail: "Tips below the cheapest quarter of tips in their slot." },
           { name: "summary.stamp", detail: "overpaid (over 30% of tips above the going rate), too_low (over 25% of compared tips too low) or fair." },
           { name: "summary.monthlyOverpayLamports", detail: "Overpay projected over 30 days from the time span covered; null when the analyzed tips span less than 10 minutes, since a month extrapolated from a minute of trades misleads." },
-          { name: "txs[].slotP25, slotP50, slotP75", detail: "Tips that landed in the same slot; null when the slot could not be compared." },
+          { name: "txs[].slotP25, slotP50, slotP75", detail: "Tips that landed in the same slot; null when the slot could not be compared, for example a block that was not yet available (counted in blocksFailed)." },
         ],
         errors: [
           { status: 400, when: "address is not a valid Solana address, or limit is not an integer from 1 to 300." },
           rateLimited("More than 6 new checkups per minute from one IP"),
+          { status: 502, when: "The wallet's history could not be read right now. The body carries errorClass (timeout, history_failed, block_unavailable or upstream) and retryable: true; retry after a second or two." },
+          { status: 503, when: "Solami rate-limited the checkup (errorClass rate_limited); retry shortly." },
         ],
       },
       {

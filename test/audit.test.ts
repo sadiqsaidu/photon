@@ -99,3 +99,28 @@ describe("monthly projection", () => {
     expect(showsProjection(s)).toBe(true);
   });
 });
+
+describe("checkup failures", () => {
+  it("classify the error for the log", async () => {
+    const { auditErrorClass } = await import("../src/audit.js");
+    const { SolamiError } = await import("../src/solami.js");
+    expect(auditErrorClass(new SolamiError("rpc", "getBlock HTTP 429", 429))).toBe("rate_limited");
+    expect(auditErrorClass(new SolamiError("rpc", "getBlock network error: The operation was aborted due to timeout"))).toBe("timeout");
+    expect(auditErrorClass(new SolamiError("rpc", "getBlock -32004 Block not available for slot 456"))).toBe("block_unavailable");
+    expect(auditErrorClass(new SolamiError("rpc", "getSignaturesForAddress -32603 internal error"))).toBe("history_failed");
+    expect(auditErrorClass(new Error("something else"))).toBe("upstream");
+  });
+
+  it("retry once after a server error, but not after a client error", async () => {
+    const { ApiError, retryOnce } = await import("../web/lib/api.js");
+    let calls = 0;
+    await expect(retryOnce(async () => (++calls === 1 ? Promise.reject(new ApiError(502, "x")) : "ok"), 1)).resolves.toBe("ok");
+    expect(calls).toBe(2);
+    calls = 0;
+    await expect(retryOnce(async () => (++calls, Promise.reject(new ApiError(0, "offline"))), 1)).rejects.toThrow("offline");
+    expect(calls).toBe(2);
+    calls = 0;
+    await expect(retryOnce(async () => (++calls, Promise.reject(new ApiError(429, "slow down"))), 1)).rejects.toThrow("slow down");
+    expect(calls).toBe(1);
+  });
+});

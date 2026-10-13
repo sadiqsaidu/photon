@@ -24,6 +24,18 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+// One automatic retry for a network failure or a server error, after a short
+// pause; client errors and rate limits are returned as they are.
+export async function retryOnce<T>(fn: () => Promise<T>, delayMs = 1_500): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (!(e instanceof ApiError) || (e.status !== 0 && e.status < 500)) throw e;
+    await new Promise((r) => setTimeout(r, delayMs));
+    return fn();
+  }
+}
+
 const post = <T>(path: string, body: unknown) =>
   call<T>(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
@@ -31,7 +43,7 @@ export const api = {
   stats: () => call<Stats>("/stats"),
   fares: () => call<Fares>("/fares"),
   examples: () => call<{ address: string; tips: number; lastSlot: number }[]>("/audit/examples"),
-  audit: (address: string) => post<Audit>("/audit", { address }),
+  audit: (address: string) => retryOnce(() => post<Audit>("/audit", { address })),
   storedAudit: (address: string) => call<Audit>(`/audit/${address}`),
   watch: (address: string) => post<{ address: string }>(`/audit/${address}/watch`, {}),
   receipt: (signature: string) => call<Receipt>(`/receipt/${signature}`),

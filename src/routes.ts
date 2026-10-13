@@ -1,5 +1,5 @@
 import { PublicKey } from "@solana/web3.js";
-import { runAudit } from "./audit.js";
+import { auditErrorClass, runAudit } from "./audit.js";
 import { blurCounts } from "./blur.js";
 import {
   AUDIT_DEFAULT_LIMIT,
@@ -203,7 +203,14 @@ export function routes(ctx: Context): Record<string, Handler> {
       const wait = audits.wait(ip);
       if (wait) throw tooMany("ip", wait, "too many checkups from this address; try again shortly");
       audits.hit(ip);
-      const audit = await runAudit(wallet, n);
+      let audit: Awaited<ReturnType<typeof runAudit>>;
+      try {
+        audit = await runAudit(wallet, n);
+      } catch (e) {
+        const errorClass = auditErrorClass(e);
+        console.error(`[audit] failed ${wallet} class=${errorClass}: ${(e as Error).message}`);
+        throw new HttpError(errorClass === "rate_limited" ? 503 : 502, "the checkup could not be completed right now; try again", { errorClass, retryable: true });
+      }
       auditRefreshed(audit);
       return audit;
     },
