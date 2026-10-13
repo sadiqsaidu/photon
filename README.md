@@ -4,7 +4,7 @@
 
 - **Live site:** https://tipwise.tech
 - **API:** https://api.tipwise.tech
-- **Demo video:** DEMO_VIDEO_URL
+- **Demo video:** https://youtu.be/PHgCA84VEvA
 
 ![The Tipwise live board: Saver, Standard and Express fares on a split-flap board, with every landed tip drifting past below](docs/screenshots/home.png)
 
