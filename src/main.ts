@@ -4,7 +4,7 @@ import { latestReceipts, markLanded, migrateDb, probeRows, prune, saveReceipt, s
 import { demo } from "./demo.js";
 import { doctor } from "./doctor.js";
 import { startGrpc } from "./grpc.js";
-import { leaderOf, onFinalized, refreshLeaders } from "./leaders.js";
+import { isSkipped, leaderOf, onFinalized, refreshLeaders } from "./leaders.js";
 import * as lifecycle from "./lifecycle.js";
 import { raceSlot, raceStats, startMirage } from "./mirage.js";
 import { budgetState, loadProbes, probeOutcomes, probeSettled, startProbes } from "./probe.js";
@@ -13,7 +13,7 @@ import { fares, quote } from "./quote.js";
 import { asReceipt, routes } from "./routes.js";
 import { startServer } from "./server.js";
 import { beamTipAddresses, leaderNow, refreshSolPrice, solPrice } from "./solami.js";
-import { addHeat, addTip, confirmedRow, mood, onConfirmed, recentHeat, refreshLag, seedWindow, tipState, useLeaders, type SlotStats } from "./tips.js";
+import { addHeat, addTip, confirmedRow, coverage, markGap, markShed, mood, onConfirmed, recentHeat, refreshLag, seedWindow, tipState, useLeaders, useSkips, type SlotStats } from "./tips.js";
 import { resumeWebhook, webhookHealth } from "./watch.js";
 
 const RECENT_RECEIPTS = 20;
@@ -49,6 +49,7 @@ async function serve(): Promise<void> {
   const probeFields = new Map<string, ProbeFields>();
   const recent: lifecycle.Receipt[] = (await latestReceipts(RECENT_RECEIPTS)).map(asReceipt);
   useLeaders(leaderOf);
+  useSkips(isSkipped);
 
   const grpc = startGrpc(beamTips, {
     onSlot(slot, status) {
@@ -71,6 +72,8 @@ async function serve(): Promise<void> {
     onBlock: lifecycle.onBlock,
     onTip: addTip,
     onTx: lifecycle.onTx,
+    onGap: markGap,
+    onShed: markShed,
   });
   const mirage = startMirage();
   const blur = startBlur(() => processed, addHeat);
@@ -140,18 +143,25 @@ async function serve(): Promise<void> {
   await refreshPrice();
   setInterval(refreshPrice, SOL_PRICE_EVERY_MS);
 
-  let fareCache: Awaited<ReturnType<typeof fares>> | null = null;
+  type FareState = Awaited<ReturnType<typeof fares>> & { warmingUp: boolean; coverage: number };
+  let fareCache: FareState | null = null;
+  let lastGood: Awaited<ReturnType<typeof fares>> | null = null;
   let fareKey = "";
+  // Too few complete slots (after a restart or a gap that was not replayed):
+  // keep the last good fares, flagged, rather than pricing a thin window.
   const refreshFares = async () => {
-    fareCache = await fares(probeOutcomes(), solPrice().usd);
-    return fareCache;
+    const c = coverage();
+    if (c.warmingUp && lastGood) return (fareCache = { ...lastGood, warmingUp: true, coverage: c.coverage });
+    const f = await fares(probeOutcomes(), solPrice().usd);
+    if (!c.warmingUp) lastGood = f;
+    return (fareCache = { ...f, warmingUp: c.warmingUp, coverage: c.coverage });
   };
   setInterval(() => {
     if (!tipState().samples) return;
     refreshFares().then(
       (f) => {
         const event = { ...f, mood: mood() };
-        const key = JSON.stringify(event);
+        const key = JSON.stringify({ ...event, coverage: undefined });
         if (key === fareKey) return;
         fareKey = key;
         bus.emit("fares", { ...event, updatedAt: Date.now() });

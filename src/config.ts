@@ -76,6 +76,12 @@ export const BASE_FEE_PER_SIGNATURE = 5_000;
 export const BLOCKHASH_VALID_BLOCKS = 150;
 
 export const TIP_WINDOW_SLOTS = 600;
+// Fares and quotes are trusted once this many complete slots (about a minute)
+// sit in the window; below it they report warmingUp.
+export const MIN_COMPLETE_SLOTS = 150;
+// A stream that starts without a replay catches the slot in progress part way,
+// so this many slots after the first one it sees count as incomplete too.
+export const GAP_EDGE_SLOTS = 2;
 export const BEAM_MIN_SAMPLES = 200;
 
 export const HEAT_WEIGHTS: Record<string, number> = {

@@ -6,6 +6,7 @@ import {
   HEAT_MULT_MIN,
   LAG_MAX_K,
   LAG_WINDOW_SLOTS,
+  MIN_COMPLETE_SLOTS,
   MOOD_QUIET_BELOW,
   MOOD_RECENT_SLOTS,
   MOOD_RUSH_ABOVE,
@@ -38,9 +39,57 @@ let lag: Lag = { k: 0, r: 0, n: 0, qualifies: false, beta: 0, computedAt: 0 };
 let lastConfirmed = 0;
 let sorted: { all: number[]; beam: number[]; eligible: number[] } = { all: [], beam: [], eligible: [] };
 let leaderOf: (slot: number) => string | null = () => null;
+let isSkipped: (slot: number) => boolean = () => false;
+// Slot ranges the stream did not deliver in full (a reconnect without replay,
+// a refused resume, or the time before this process started), and slots whose
+// tip data is known to be partial. Incomplete slots stay on the dashboard but
+// are kept out of prices, mood, the lag test and the forecast.
+const gaps: { from: number; to: number }[] = [];
+const incomplete = new Set<number>();
 
 export function useLeaders(fn: (slot: number) => string | null): void {
   leaderOf = fn;
+}
+
+export function useSkips(fn: (slot: number) => boolean): void {
+  isSkipped = fn;
+}
+
+export function markGap(from: number, to: number): void {
+  const lo = Math.max(from, to - TIP_WINDOW_SLOTS);
+  if (to >= lo) gaps.push({ from: lo, to });
+  for (let s = lo; s <= to; s++) if (samples.has(s)) incomplete.add(s);
+}
+
+export function inGap(slot: number): boolean {
+  return gaps.some((g) => slot >= g.from && slot <= g.to);
+}
+
+// Transaction updates shed by the bounded gRPC queue leave their slot partial.
+export function markShed(slot: number): void {
+  incomplete.add(slot);
+}
+
+export function isComplete(slot: number): boolean {
+  return samples.has(slot) && !incomplete.has(slot);
+}
+
+// Complete slots over the window's slots, leaving out leader-skipped slots,
+// which never produce data.
+export function coverage() {
+  const lo = lastConfirmed - TIP_WINDOW_SLOTS;
+  let complete = 0;
+  let skipped = 0;
+  for (const s of samples.keys()) if (s > lo && !incomplete.has(s)) complete++;
+  if (lastConfirmed) for (let s = lo + 1; s <= lastConfirmed; s++) if (isSkipped(s)) skipped++;
+  const windowSlots = TIP_WINDOW_SLOTS - skipped;
+  return {
+    coverage: Math.round(Math.min(1, complete / windowSlots) * 1000) / 1000,
+    completeSlots: complete,
+    incompleteSlots: Math.max(0, windowSlots - complete),
+    windowSlots,
+    warmingUp: complete < MIN_COMPLETE_SLOTS,
+  };
 }
 
 // Stored rows for the window, so the dashboard has data before (or without)
@@ -128,6 +177,8 @@ function heatAt(slot: number): number {
 function prune(): void {
   for (const s of pending.keys()) if (s < lastConfirmed - 150) pending.delete(s);
   for (const s of samples.keys()) if (s <= lastConfirmed - TIP_WINDOW_SLOTS) samples.delete(s);
+  for (const s of incomplete) if (s <= lastConfirmed - LAG_WINDOW_SLOTS) incomplete.delete(s);
+  for (let i = gaps.length - 1; i >= 0; i--) if ((gaps[i] as { to: number }).to <= lastConfirmed - LAG_WINDOW_SLOTS) gaps.splice(i, 1);
   for (const s of heat.keys()) if (s <= lastConfirmed - LAG_WINDOW_SLOTS - LAG_MAX_K) heat.delete(s);
   while (recent.length && (recent[0] as SlotStats).slot <= lastConfirmed - LAG_WINDOW_SLOTS) recent.shift();
 }
@@ -136,6 +187,7 @@ export function onConfirmed(slot: number): SlotStats | null {
   const tips = [...(pending.get(slot)?.values() ?? [])];
   pending.delete(slot);
   if (slot > lastConfirmed) lastConfirmed = slot;
+  if (inGap(slot)) incomplete.add(slot);
   const values = tips.map((t) => t.lamports).sort((a, b) => a - b);
   const stats: SlotStats = {
     slot,
@@ -156,14 +208,14 @@ export function onConfirmed(slot: number): SlotStats | null {
   else {
     recent.push(stats);
     recent.sort((a, b) => a.slot - b.slot);
-    if (stats.count > 0) {
+    if (stats.count > 0 && !incomplete.has(slot)) {
       f50.observe(stats.p50);
       f90.observe(stats.p90);
     }
   }
   prune();
   const all: number[] = [], beam: number[] = [];
-  for (const list of samples.values()) for (const t of list) (t.source === "beam" ? beam : all).push(t.lamports);
+  for (const [s, list] of samples) if (!incomplete.has(s)) for (const t of list) (t.source === "beam" ? beam : all).push(t.lamports);
   const combined = all.concat(beam).sort((a, b) => a - b);
   sorted = { all: combined, beam: beam.sort((a, b) => a - b), eligible: combined.filter((v) => v >= BEAM_MIN_TIP) };
   bus.emit("tips", windowRow(stats));
@@ -178,7 +230,7 @@ export function confirmedRow(slot: number): SlotStats | null {
 }
 
 export function refreshLag(): Lag {
-  lag = computeLag(recent.filter((r) => r.count > 0).map((r) => ({ slot: r.slot, p75: r.p75, heat: heatAt(r.slot) })));
+  lag = computeLag(recent.filter((r) => r.count > 0 && !incomplete.has(r.slot) && !inGap(r.slot)).map((r) => ({ slot: r.slot, p75: r.p75, heat: heatAt(r.slot) })));
   bus.emit("lag", lag);
   return lag;
 }
@@ -230,7 +282,7 @@ export function moodOf(recentMedian: number, windowMedian: number): { mood: Mood
 export function mood(): { mood: Mood; ratio: number } {
   const since = lastConfirmed - MOOD_RECENT_SLOTS;
   const newest: number[] = [];
-  for (const [slot, list] of samples) if (slot > since) for (const t of list) newest.push(t.lamports);
+  for (const [slot, list] of samples) if (slot > since && !incomplete.has(slot)) for (const t of list) newest.push(t.lamports);
   return moodOf(percentile(newest.sort((a, b) => a - b), 50), percentile(sorted.all, 50));
 }
 
@@ -246,6 +298,7 @@ function windowRow(r: SlotStats) {
     heat: heatAt(r.slot),
     dots: dotsOf(r.slot),
     beam: dotsOf(r.slot, "beam"),
+    ...(incomplete.has(r.slot) || (!samples.has(r.slot) && inGap(r.slot)) ? { incomplete: true } : {}),
   };
 }
 
@@ -262,6 +315,7 @@ export function tipState() {
     allSamples: sorted.all.length,
     beamSamples: sorted.beam.length,
     floorPercentile: floorPercentile(),
+    coverage: coverage(),
     forecast: Array.from({ length: 10 }, (_, i) => ({ h: i + 1, p50: projected(f50, i + 1), p90: projected(f90, i + 1) })),
   };
 }

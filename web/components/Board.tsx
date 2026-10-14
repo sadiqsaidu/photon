@@ -78,7 +78,7 @@ export function Board() {
   ];
 
   return (
-    <section className={`${s.board} ${stale ? s.stale : ""}`} aria-labelledby="board-title">
+    <section className={`${s.board} ${stale ? s.stale : ""} ${fares?.warmingUp ? s.warming : ""}`} aria-labelledby="board-title">
       <h2 id="board-title" className="sr-only">
         Live fares
       </h2>

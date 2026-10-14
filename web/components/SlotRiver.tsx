@@ -125,6 +125,10 @@ export function SlotRiver() {
         ctx.fillText(decadeLabel(10 ** d, priceRef.current), plotW + 8, yy + 4);
       }
 
+      // Slots that arrived incomplete after a reconnect are shaded; prices leave them out.
+      ctx.fillStyle = `rgba(${INK}, 0.07)`;
+      for (const r of rows) if (r.incomplete) ctx.fillRect(x(r.slot) - pxPerSlot / 2, top, Math.max(1, pxPerSlot), bottom - top);
+
       const dot = Math.max(1.4, Math.min(2.2, pxPerSlot * 0.9));
       ctx.fillStyle = `rgba(${INK}, 0.30)`;
       for (const r of rows) {

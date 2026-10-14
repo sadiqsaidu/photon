@@ -25,7 +25,7 @@ import { calibration, quote, reachableBuckets, trackRecord, type fares } from ".
 import { HttpError, limiter, type Handler } from "./server.js";
 import { solPrice, rpc } from "./solami.js";
 import type { StreamHealth } from "./stream.js";
-import { distribution, mood, tipState, topPayers } from "./tips.js";
+import { coverage, distribution, mood, tipState, topPayers } from "./tips.js";
 import { auditRefreshed, onWebhookPost, watchedCount, watchWallet } from "./watch.js";
 
 export interface Context {
@@ -111,15 +111,20 @@ export function routes(ctx: Context): Record<string, Handler> {
     return { fare, quotedProbability: f.probability, deadlineSlots: f.deadlineSlots };
   };
   return {
-    "GET /health": () => ({
-      // The webhook stream idles on purpose while no wallet is being watched.
-      ok: ctx.streams().every((s) => s.connected || (s.name === "webhooks" && watchedCount() === 0)),
-      slot: ctx.slot(),
-      behind: ctx.behind(),
-      maxBehind: ctx.maxBehind(),
-      degraded: ctx.degraded(),
-      streams: ctx.streams(),
-    }),
+    "GET /health": () => {
+      const c = coverage();
+      return {
+        // The webhook stream idles on purpose while no wallet is being watched.
+        ok: ctx.streams().every((s) => s.connected || (s.name === "webhooks" && watchedCount() === 0)),
+        coverage: c.coverage,
+        incompleteSlots: c.incompleteSlots,
+        slot: ctx.slot(),
+        behind: ctx.behind(),
+        maxBehind: ctx.maxBehind(),
+        degraded: ctx.degraded(),
+        streams: ctx.streams(),
+      };
+    },
     "GET /stats": async () => ({
       slot: ctx.slot(),
       chainTip: ctx.chainTip(),
@@ -172,7 +177,11 @@ export function routes(ctx: Context): Record<string, Handler> {
       if (!config.adminToken || headers.authorization !== `Bearer ${config.adminToken}`) throw new HttpError(404, "not found");
       return { wallet: ctx.probeWallet, ...budgetState() };
     },
-    "GET /quote": ({ query }) => quote(Math.round(num(query, "deadline", 2, 1, 32)), num(query, "confidence", 0.9, 0.01, 0.999), probeOutcomes()),
+    "GET /quote": async ({ query }) => {
+      const q = await quote(Math.round(num(query, "deadline", 2, 1, 32)), num(query, "confidence", 0.9, 0.01, 0.999), probeOutcomes());
+      const c = coverage();
+      return { ...q, warmingUp: c.warmingUp, coverage: c.coverage };
+    },
     "GET /tips/addresses": () => ({ beam: ctx.beamTips, jito: JITO_TIP_ACCOUNTS }),
     "POST /send": async ({ body }) => {
       const { tx, fare } = (body ?? {}) as { tx?: unknown; fare?: unknown };

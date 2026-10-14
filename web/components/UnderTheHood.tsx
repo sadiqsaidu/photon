@@ -132,11 +132,14 @@ function Health() {
   const behind = useLive((st) => st.behind);
   const maxBehind = useLive((st) => st.maxBehind);
   const products = useLive((st) => st.products);
-  const grpc = products.find((p) => p.id === "grpc")?.values as { mbps?: number; queue?: number; reconnects?: number } | undefined;
+  const grpc = products.find((p) => p.id === "grpc")?.values as { mbps?: number; queue?: number; reconnects?: number; coverage?: number; incompleteSlots?: number } | undefined;
   // The webhook stream idles on purpose while no wallet is watched; its retries are not faults.
   const webhooksIdle = products.find((p) => p.id === "webhooks")?.status === "idle";
   const cells = [
     { k: "gRPC bandwidth", v: grpc?.mbps !== undefined ? `${grpc.mbps.toFixed(2)} MB/s` : "" },
+    ...(grpc?.coverage !== undefined
+      ? [{ k: "Tip window coverage", v: `${Math.round(grpc.coverage * 100)}%${grpc.incompleteSlots ? `, ${number(grpc.incompleteSlots)} slots incomplete` : ""}` }]
+      : []),
     { k: "Queue depth", v: grpc?.queue !== undefined ? number(grpc.queue) : "" },
     { k: "Reconnects", v: number(streams.filter((x) => !(x.name === "webhooks" && (x.idle || webhooksIdle))).reduce((a, x) => a + x.reconnects, 0)) },
     { k: "Behind the chain tip", v: `${behind} now, ${maxBehind} worst` },

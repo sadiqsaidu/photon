@@ -36,6 +36,8 @@ export interface Fares {
   tipCeilingLamports?: number;
   slotMs?: number;
   pricing?: "market-percentile";
+  warmingUp?: boolean;
+  coverage?: number;
 }
 
 export interface WindowRow {
@@ -49,6 +51,7 @@ export interface WindowRow {
   heat: number;
   dots: number[];
   beam: number[];
+  incomplete?: boolean;
 }
 
 export interface Product {

@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import bs58 from "bs58";
-import { config, JITO_TIP_ACCOUNTS, requireApiKey } from "./config.js";
+import { config, GAP_EDGE_SLOTS, JITO_TIP_ACCOUNTS, requireApiKey } from "./config.js";
 import { streamError, supervise, type StreamHealth } from "./stream.js";
 
 type Yellowstone = typeof import("@triton-one/yellowstone-grpc");
@@ -29,6 +29,10 @@ export interface GrpcHandlers {
   onBlock(slot: number, blockhash: string, blockHeight: number): void;
   onTip(tip: Tip): void;
   onTx(signature: string, slot: number, failed: boolean): void;
+  // Slots from `from` to `to` were not delivered in full.
+  onGap?(from: number, to: number): void;
+  // A transaction update for `slot` was shed by the bounded queue.
+  onShed?(slot: number): void;
 }
 
 const hex = (k: Uint8Array) => Buffer.from(k).toString("hex");
@@ -38,6 +42,27 @@ const WORK_SLICE_MS = 8;
 const WARN_EVERY_MS = 30_000;
 // Solami replays at most 3,500 slots; past that a resume would be refused.
 const REPLAY_WINDOW_MS = 15 * 60_000;
+
+// Where the next session starts: one slot before the last one seen, if Solami
+// can still replay it and did not refuse the last resume; 0 means live only.
+export function resumeSlot(lastSlot: number, lastSlotAt: number, now: number, refused: boolean): number {
+  return lastSlot && !refused && now - lastSlotAt < REPLAY_WINDOW_MS ? lastSlot - 1 : 0;
+}
+
+// Solami's answer to a from_slot it can no longer replay, as opposed to a
+// network fault, after which the same resume is tried again.
+export function refusesResume(e: Error & { code?: number }): boolean {
+  return e.code === 3 || e.code === 11 || /from.?slot|replay/i.test(e.message);
+}
+
+// The slots a session missed, judged from the first processed slot it
+// delivers: everything after the last slot received when it starts live, or
+// when a replay starts later than asked. The first slots of a live start are
+// caught part way, so they count as missed too.
+export function sessionGap(resumeFrom: number, lastReceived: number, firstSlot: number): { from: number; to: number } | null {
+  if (resumeFrom && firstSlot <= lastReceived + 1) return null;
+  return { from: lastReceived + 1, to: firstSlot + (resumeFrom ? -1 : GAP_EDGE_SLOTS) };
+}
 
 // Every transaction Tipwise sends carries a Beam tip, so the tip filters also
 // drive lifecycle tracking. Successful transactions arrive in full (balances
@@ -91,6 +116,8 @@ export function startGrpc(beamTips: string[], h: GrpcHandlers): StreamHealth {
   const prefixes = new Set(tipAccounts.map((a) => Buffer.from(bs58.decode(a)).readUInt32LE(0)));
   let lastSlot = 0;
   let lastSlotAt = 0;
+  let lastReceived = 0;
+  let resumeRefused = false;
   let seen = 0;
 
   // The receive callback only enqueues, so grpc-js keeps draining the socket
@@ -147,6 +174,7 @@ export function startGrpc(beamTips: string[], h: GrpcHandlers): StreamHealth {
     q.depth = queue.length - head;
     if (q.depth >= QUEUE_CAPACITY && (u.transaction || u.transactionStatus)) {
       q.dropped++;
+      if (u.transaction) h.onShed?.(Number(u.transaction.slot));
       return;
     }
     queue.push(u);
@@ -166,7 +194,8 @@ export function startGrpc(beamTips: string[], h: GrpcHandlers): StreamHealth {
       "grpc-node.flow_control_window": 16 * 1024 * 1024,
     });
     const stream = await client.subscribe();
-    const resumeFrom = lastSlot && Date.now() - lastSlotAt < REPLAY_WINDOW_MS ? lastSlot - 1 : 0;
+    const resumeFrom = resumeSlot(lastSlot, lastSlotAt, Date.now(), resumeRefused);
+    let first = true;
     await new Promise<void>((resolve, reject) => {
       signal.addEventListener("abort", () => {
         stream.cancel();
@@ -175,7 +204,21 @@ export function startGrpc(beamTips: string[], h: GrpcHandlers): StreamHealth {
       let received = false;
       stream.on("data", (u: SubscribeUpdate) => {
         received = true;
+        resumeRefused = false;
         health.lastEventAt = Date.now();
+        if (u.slot && SLOT_STATUS[u.slot.status] === "processed") {
+          const slot = Number(u.slot.slot);
+          if (first) {
+            first = false;
+            const gap = sessionGap(resumeFrom, lastReceived, slot);
+            if (gap && gap.to >= gap.from) {
+              h.onGap?.(gap.from, gap.to);
+              const since = gap.from > 1 ? `slot ${gap.from}` : "process start";
+              console.warn(`[grpc] ${resumeFrom ? "replay started late" : "no replay"}: data from ${since} through slot ${gap.to} marked incomplete`);
+            }
+          }
+          if (slot > lastReceived) lastReceived = slot;
+        }
         enqueue(u, health);
       });
       stream.on("error", (e: Error & { code?: number }) => {
@@ -187,6 +230,8 @@ export function startGrpc(beamTips: string[], h: GrpcHandlers): StreamHealth {
         const refusedAtOnce = e.code === 1 && !received && !signal.aborted;
         const backpressure = e.code === 8 && !billing ? true : /backpressure|slow consumer|lagging|buffer full/i.test(e.message);
         const message = refusedAtOnce ? "subscription cancelled by Solami before any data (key, plan or permission)" : e.message;
+        // A resume Solami rejects is not retried; the next session starts live and records the gap.
+        if (resumeFrom && !received && refusesResume(e)) resumeRefused = true;
         reject(streamError(message, { blocked: refusedAtOnce || e.code === 7 || e.code === 16 || (e.code === 8 && billing), backpressure }));
       });
       stream.on("end", resolve);

@@ -4,7 +4,7 @@ import { raceStats } from "./mirage.js";
 import { priorityFeeAge } from "./quote.js";
 import { solPrice } from "./solami.js";
 import type { StreamHealth } from "./stream.js";
-import { tipsPerMinute } from "./tips.js";
+import { coverage, tipsPerMinute } from "./tips.js";
 import { watchedCount } from "./watch.js";
 
 export type ProductStatus = "live" | "reconnecting" | "refused" | "idle";
@@ -66,7 +66,7 @@ export async function products(ctx: ProductContext) {
       status: streamStatus(grpc),
       job: "Streams every block and every tip that lands in it.",
       metric: `${tipsPerMinute().toLocaleString("en-US")} tips in the last minute at ${mbps.toFixed(2)} MB/s`,
-      values: { tipsPerMinute: tipsPerMinute(), mbps: Math.round(mbps * 100) / 100, queue: grpc?.queue?.depth ?? 0, reconnects: grpc?.reconnects ?? 0 },
+      values: { tipsPerMinute: tipsPerMinute(), mbps: Math.round(mbps * 100) / 100, queue: grpc?.queue?.depth ?? 0, reconnects: grpc?.reconnects ?? 0, coverage: coverage().coverage, incompleteSlots: coverage().incompleteSlots },
     },
     {
       id: "mirage",

@@ -159,6 +159,8 @@ export const GROUPS: Group[] = [
           { name: "fares[].ceilingLimited", detail: "true when the tip ceiling held the price below where the market percentile or the step put it." },
           { name: "fares[].probabilityAtCheaperTip", detail: "Optional. The estimate for the next cheaper fare's tip at this fare's deadline: compare it with probability to see what paying more is measured to add. null for Saver." },
           { name: "pricing", detail: "Optional. \"market-percentile\" on servers that price fares this way. Absent on older servers, which priced each fare at the cheapest range meeting its target." },
+          { name: "warmingUp", detail: "Optional. true while fewer than 150 complete slots (about a minute) sit in the 600 slot window, after a restart or a stream gap that could not be replayed; fares then repeat the last good prices." },
+          { name: "coverage", detail: "Optional. Complete slots over the window's slots (leader-skipped slots left out), 0 to 1. Slots missed by a reconnect or partly shed by the stream queue are left out of prices." },
           { name: "calibrated, progress", detail: "Whether every reachable range has 10 test trips, and how many of the needed trips are done." },
           { name: "samples", detail: "Landed tips at or above the Beam minimum in the 600 slot window the prices come from." },
           { name: "mood", detail: "Median tip of the last 50 slots against the window median. Context only; it does not change the estimates." },
@@ -206,6 +208,7 @@ export const GROUPS: Group[] = [
         fields: [
           { name: "buckets[]", detail: "Every percentile range of tips Beam accepts, with its estimate p, test trips n, basis, and whether a tip at or below the ceiling can reach it." },
           { name: "forecastHorizonSlots", detail: "Equal to deadline for custom quotes." },
+          { name: "warmingUp, coverage", detail: "Optional. As on GET /fares: whether the window holds enough complete slots to trust, and the share that is complete. A quote is always computed from the complete slots it has." },
           { name: "distribution", detail: "Which landed tips the percentiles come from (Beam tips alone once there are 200, otherwise all tips at or above the Beam minimum) and where the Beam minimum sits among all landed tips." },
           { name: "heatMultiplier", detail: "1 unless the market activity lag test qualifies, in which case the price is scaled by 0.8 to 2." },
         ],
@@ -479,6 +482,7 @@ export const GROUPS: Group[] = [
         fields: [
           { name: "behind, maxBehind", detail: "Slots between Tipwise's stream and Solami's chain tip, now and at worst since start." },
           { name: "degraded", detail: "Features Solami refused (missing permission, plan or balance), each { feature, error }." },
+          { name: "coverage, incompleteSlots", detail: "Optional. Share of the tip window's slots with complete data, and how many are missing or partial (a reconnect that could not be replayed, a restart, or transaction updates shed by the stream queue). Leader-skipped slots do not count." },
           { name: "streams[].idle", detail: "true while a stream is paused on purpose: the webhooks stream runs only while a wallet is watched. An idle stream has no error, counts no reconnects and does not affect ok." },
         ],
       },

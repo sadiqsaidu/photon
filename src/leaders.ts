@@ -1,15 +1,21 @@
 import { LEADER_COUNT, LEADER_REFRESH_SLOTS } from "./config.js";
 import { leaderStats, saveSkip } from "./db.js";
 import { rpc } from "./solami.js";
+import { inGap } from "./tips.js";
 
 const KEEP_SLOTS = 5_000;
 
 const schedule = new Map<number, string>();
+const skipped = new Set<number>();
 let refreshedAt = 0;
 let lastFinalized = 0;
 
 export function leaderOf(slot: number): string | null {
   return schedule.get(slot) ?? null;
+}
+
+export function isSkipped(slot: number): boolean {
+  return skipped.has(slot);
 }
 
 export async function refreshLeaders(slot: number): Promise<void> {
@@ -23,15 +29,19 @@ export async function refreshLeaders(slot: number): Promise<void> {
 }
 
 // Finalized slots form one chain, so a gap between consecutive finalized
-// slots is a slot whose leader produced nothing that survived.
+// slots is a slot whose leader produced nothing that survived. Slots the
+// stream itself missed are not skips.
 export function onFinalized(slot: number): void {
   if (lastFinalized && slot > lastFinalized + 1 && slot - lastFinalized < 64) {
     for (let s = lastFinalized + 1; s < slot; s++) {
+      if (inGap(s)) continue;
+      skipped.add(s);
       const leader = leaderOf(s);
       if (leader) saveSkip(s, leader).catch((e: Error) => console.error(`[db] skip ${s}: ${e.message}`));
     }
   }
   if (slot > lastFinalized) lastFinalized = slot;
+  for (const s of skipped) if (s < slot - KEEP_SLOTS) skipped.delete(s);
 }
 
 export async function upcomingLeaders(currentSlot: number) {

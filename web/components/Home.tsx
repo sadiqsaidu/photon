@@ -51,6 +51,14 @@ export function FareNotes() {
   const stepped = fares?.fares.some((f) => f.stepApplied);
   return (
     <div className={s.notes} aria-live="polite">
+      {fares?.warmingUp && (
+        <p className={`${s.same} ${s.quiet}`}>
+          <span className={s.sameMark} aria-hidden="true">
+            i
+          </span>
+          Catching up with the chain after a reconnect
+        </p>
+      )}
       {notes.map((n) => (
         <p key={n.text.slice(0, 40)} className={`${s.same} ${n.kind === "gain" ? s.quiet : ""}`}>
           <span className={`${s.sameMark} ${n.kind === "unmet" ? s.unmetMark : ""}`} aria-hidden="true">
